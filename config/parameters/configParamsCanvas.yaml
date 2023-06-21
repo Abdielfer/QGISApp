@@ -1,0 +1,46 @@
+## We can add a dictionary for avery function to call from dc_extract module. 
+# IMPORTANT: See dc_extract documentation for detailles. 
+dc_extrac_cog: { bbox: '-123.3250,51.9500,-120.1473,53.7507',
+                bbox_crs: 'EPSG:4326',
+                collection : 'cdem:dem'}
+# bbox: '-123.3250,51.9500,-120.1473,53.7507' #Format : 'xMinLeft, yMinLeft, xMaxRigh, yMaxRight' or 
+# collection : 'cdem:dem' # sintax --> 'colection:asset'
+# dc_extract_cog's list of params:
+# bbox_crs: None #str
+# field_value : None
+# field_id : None #str
+# geom_file: None #str
+# resolution: None,# int
+# method: 'nearest' #str ()
+# out_crs: None #str
+# out_dir: None # str
+# suffix: None  # str
+# datetime_filter: None # str
+# resolution_filter: None # str
+# overviews: False 
+# debug: False
+# mosaic: False 
+# orderby: 'date' 
+# desc: True
+
+dc_search: {name: 'dc_output\example\testSearch.gpkg',
+            bbox: '-123.3250,51.9500,-120.1473,53.7507'}
+
+# name:str='./data/search/dce.gpkg' --> gpkg to be created with search results. 
+# urls:list= ['https://datacube.services.geo.ca/api'],
+# bbox:str=None,'xMinLeft, yMinLeft, xMaxRigh, yMaxRight'
+# dt:str=None,
+# cols:str=None,
+# geojson:bool=False
+
+dc_description: {name: dc_output\example\description.gpkg,
+                collection: 'cdem:dem',
+                urls: ['https://datacube.services.geo.ca/api'],
+                geojson: False,
+                }
+# name : dc_output\example\description.gpkg --> Path and Name for the description file in gpkg format. 
+# collection : None --> Collectionm name and asset ex. 'cdem:dem'
+# geojson : False  -->whether to create or not geojson in the output. Default: Flase
+#________________________________________________________________
+# Values that can be shared by all functions:
+date_time : None  # datetime_str_in_ISO_8601_with_Z. (ex. str --> '2011-08-12T20:17:46.384Z') Optional defaults to None. 

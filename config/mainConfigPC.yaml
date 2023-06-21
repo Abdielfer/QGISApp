@@ -1,15 +1,12 @@
 
 defaults:
-  - parameters: configCanvas
+  - parameters: configParamsCanvas  #Define which config to call. 
   - _self_
-
 
 work_dir: ${hydra:runtime.cwd}  # where the code is executed
 config_name: ${hydra:job.config_name}
 config_override_dirname: ${hydra:job.override_dirname}
 config_path: ${hydra:runtime.config_sources}
-projectRoot: C:\Users\abfernan\CrossCanFloodMapping\DL4Flood
+# projectRoot: C:\Users\abfernan\CrossCanFloodMapping\DL4Flood
 saveModelsPath: ${hydra:runtime.cwd} 
-
-dataRoot: 
-output_dir : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\config\Example" # No need for last slash
+output_dir : 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example' # No need for last slash
