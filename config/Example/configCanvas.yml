@@ -1,0 +1,7 @@
+dc_extraction:
+ - bbox: 'xMinLeft, yMinLeft, xMaxRigh, yMaxRight'
+ - crs: 'EPSG:4326'
+ - collection : 'cdem:dem' # sintax --> 'colection:asset'
+
+dc_searsh:
+ -name: 'path/and/name/*.gpkg'
