@@ -8,18 +8,35 @@ import util as U
 import logging
 
 def dc_describe(cfg: DictConfig):
+    '''
+    Configurate the call of the d.describe() with hydra parameters.
+    '''
     args = OmegaConf.create(cfg.parameters['dc_description'])
-    d.collections(name = args['collection'])
+    d.collections(name = args['name'])
     return True
 
 def dc_serach(cfg: DictConfig):
+    '''
+    Configurate the call of the d.search()  with hydra parameters.
+    '''
     args = OmegaConf.create(cfg.parameters['dc_search'])
-    d.search(name=args['name'],bbox=args['bbox'],cols=args['collection'])
+    print(args) 
+    d.search(name= r'C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/AutomationOutput/example/testSearch.gpkg',
+             bbox='-123.3250,51.9500,-120.1473,53.7507',
+             cols= 'cdem',
+             )
     return True
 
 def dc_extraction(cfg: DictConfig):
+    '''
+    Configurate the call of the exc.extract_cog() with hydra parameters.
+    '''
     args = OmegaConf.create(cfg.parameters['dc_extrac_cog'])
-    exc.extract_cog(bbox=args['bbox'],bbox_crs= args['bbox_crs'],out_dir= cfg['output_dir'],collections=args['collection'], )
+    print(args) 
+    # exc.extract_cog(bbox=args['bbox'],
+    #                 bbox_crs= args['bbox_crs'],
+    #                 out_dir= cfg['output_dir'],
+    #                 collections=args['collection'],)
     return True
 
 def logger(cfg: DictConfig, nameByTime):
@@ -36,12 +53,15 @@ def logger(cfg: DictConfig, nameByTime):
 def main(cfg: DictConfig):
     nameByTime = U.makeNameByTime()
     logger(cfg,nameByTime)
-    d = dc_describe(cfg)
-    print(f"Describe -->{d}")
+    # d = dc_describe(cfg)
+    # logging.info(f"Description output path: {d}")
+    # print(f"Describe -->{d}")
     se = dc_serach(cfg)
+    logging.info(f"Search output path: {se}")
     print(f"Search-->{se}")
-    ex = dc_extraction(cfg)
-    print(f"Extraction -->{ex}")
+    # ex = dc_extraction(cfg)
+    # logging.info(f"Extraction output path: {ex}")
+    # print(f"Extraction -->{ex}")
 
 if __name__ == "__main__":
     with U.timeit():
