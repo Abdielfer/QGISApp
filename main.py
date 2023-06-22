@@ -6,7 +6,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging
-from wbw_test import checkIn as chI
+# from wbw_test import checkIn as chI   ##IMPORTANT: DO NOT USE. If two instance are created it can kill my license. Thank you!!
 
 def dc_describe(cfg: DictConfig):
     '''
@@ -45,9 +45,8 @@ def main(cfg: DictConfig):
     logger(cfg,nameByTime)
     # dc_describe(cfg)
     # dc_serach(cfg)
-    # ex = dc_extraction(cfg)
-    # logging.info(f"Extraction output path: {ex}")
-    # chI()
+    ex = dc_extraction(cfg)
+    logging.info(f"Extraction output path: {ex}")
 
 
 if __name__ == "__main__":

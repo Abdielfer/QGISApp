@@ -5,15 +5,15 @@
 
 dc_extrac_cog:
  _target_: dc_extract.extract_cog.extract_cog.extract_cog
- bbox_crs: 'EPSG:4326'
+#  bbox_crs: 'EPSG:4326'
  collections : 'cdem:dem'
- bbox: '-123.3250,51.9500,-120.1473,53.7507' 
+#  bbox: '-123.3250,51.9500,-120.1473,53.7507' 
 # dc_extract_cog's list of params:
-#  field_value : 1 # str, int, float
-#  field_id : 'id' #str
-#  geom_file: 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_reprojc.gpkg' #str
+ field_value : 1 # str, int, float
+ field_id : 'fid' #str
+ geom_file: 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnell_large.gpkg' #str
 #  resolution: 16 # int
-#  method: 'bilinear' #str ()
+ method: 'bilinear' #str ()
 #  out_crs: 'EPSG:4326' #str
  out_dir: 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel'
 # suffix: None  # str
