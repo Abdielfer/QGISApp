@@ -6,6 +6,7 @@
 *.csv
 *.GTiff
 *.tiff
+*.tif
 *.shp
 *.pkl
 *.txt
