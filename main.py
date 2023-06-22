@@ -6,6 +6,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging
+from wbw_test import checkIn as chI
 
 def dc_describe(cfg: DictConfig):
     '''
@@ -46,7 +47,7 @@ def main(cfg: DictConfig):
     dc_serach(cfg)
     ex = dc_extraction(cfg)
     logging.info(f"Extraction output path: {ex}")
-
+    chI()
 if __name__ == "__main__":
     with U.timeit():
         main()  
