@@ -28,10 +28,9 @@ dc_extrac_cog:
 # desc: True
 
 dc_search:
- _target_: dc_extract.extract_cog.extract_cog.search
+ _target_: dc_extract.describe.describe.search
  name: '\AutomationOutput\example\testSearch.gpkg'
  bbox: '-123.3250,51.9500,-120.1473,53.7507'
- collection: 'cdem:dem'
  dt: None
  cols: None
  geojson: False
@@ -43,7 +42,7 @@ dc_search:
 # cols:str=None,
 # geojson:bool=False
 
-describeCollections: 
+dc_describeCollections: 
  _target_: dc_extract.describe.describe.collections
  name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\automationOutput\example\description.gpkg'
 #  urls: ['https://datacube.services.geo.ca/api'] 

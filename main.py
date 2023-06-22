@@ -11,7 +11,7 @@ def dc_describe(cfg: DictConfig):
     '''
     Configurate the call of the d.describe() with hydra parameters.
     '''
-    instantiate(OmegaConf.create(cfg.parameters['describeCollections']))
+    instantiate(OmegaConf.create(cfg.parameters['dc_describeCollections']))
     return True
 
 def dc_serach(cfg: DictConfig):
@@ -35,14 +35,14 @@ def logger(cfg: DictConfig, nameByTime):
     logging.info(f"Excecution number: {nameByTime}")
     logging.info(f"Output directory :{cfg['output_dir']}")
     logging.info(f"dc_search inputs: {cfg.parameters.dc_search}")
-    logging.info(f"dc_description inputs: {cfg.parameters.dc_description}")
+    logging.info(f"dc_description inputs: {cfg.parameters.dc_describeCollections}")
     logging.info(f"dc_extract inputs: {cfg.parameters.dc_extrac_cog}")
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     nameByTime = U.makeNameByTime()
     logger(cfg,nameByTime)
-    dc_describe(cfg)
+    # dc_describe(cfg)
     se = dc_serach(cfg)
     logging.info(f"Search output path: {se}")
     print(f"Search-->{se}")
