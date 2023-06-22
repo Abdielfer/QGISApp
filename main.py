@@ -42,13 +42,10 @@ def logger(cfg: DictConfig, nameByTime):
 def main(cfg: DictConfig):
     nameByTime = U.makeNameByTime()
     logger(cfg,nameByTime)
-    # dc_describe(cfg)
-    se = dc_serach(cfg)
-    logging.info(f"Search output path: {se}")
-    print(f"Search-->{se}")
+    dc_describe(cfg)
+    dc_serach(cfg)
     ex = dc_extraction(cfg)
     logging.info(f"Extraction output path: {ex}")
-    print(f"Extraction -->{ex}")
 
 if __name__ == "__main__":
     with U.timeit():

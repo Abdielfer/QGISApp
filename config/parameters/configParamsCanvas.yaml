@@ -29,7 +29,7 @@ dc_extrac_cog:
 
 dc_search:
  _target_: dc_extract.describe.describe.search
- name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\automationOutput\example\description.gpkg'
+ name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example\description.gpkg'
  bbox: '-123.3250,51.9500,-120.1473,53.7507'
 #  urls: ['https://datacube.services.geo.ca/api']         
 #  dt: None
@@ -39,7 +39,7 @@ dc_search:
 
 dc_describeCollections: 
  _target_: dc_extract.describe.describe.collections
- name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\automationOutput\example\description.gpkg'
+ name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example\description.gpkg'
 #  urls: ['https://datacube.services.geo.ca/api'] 
 #  geojson : False 
 #________________________________________________________________
