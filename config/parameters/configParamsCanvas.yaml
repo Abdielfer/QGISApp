@@ -17,7 +17,7 @@ dc_extrac_cog:
 # resolution: None,# int
 # method: 'nearest' #str ()
 # out_crs: None #str
-# out_dir: None # str
+ out_dir: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example'
 # suffix: None  # str
 # datetime_filter: None # str
 # resolution_filter: None # str
@@ -29,18 +29,13 @@ dc_extrac_cog:
 
 dc_search:
  _target_: dc_extract.describe.describe.search
- name: '\AutomationOutput\example\testSearch.gpkg'
+ name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\automationOutput\example\description.gpkg'
  bbox: '-123.3250,51.9500,-120.1473,53.7507'
- dt: None
- cols: None
- geojson: False
+#  urls: ['https://datacube.services.geo.ca/api']         
+#  dt: None
+ cols: 'cdem'
+#  geojson: False
 
-# name:str='./data/search/dce.gpkg' --> gpkg to be created with search results. NOTE: Provide full path 
-# urls:list= ['https://datacube.services.geo.ca/api'],
-# bbox:str=None,'xMinLeft, yMinLeft, xMaxRigh, yMaxRight'
-# dt:str=None,
-# cols:str=None,
-# geojson:bool=False
 
 dc_describeCollections: 
  _target_: dc_extract.describe.describe.collections
