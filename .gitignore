@@ -29,6 +29,7 @@ venvFlood/
 
 # Output files 
 outputs/
+AutomationOutput/
 
 # Submodule
 dc_extract/
