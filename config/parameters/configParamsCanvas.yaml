@@ -1,8 +1,12 @@
-## We can add a dictionary for avery function to call from dc_extract module. 
+## We can add a dictionary for every function to call from dc_extract module. 
 # IMPORTANT: See dc_extract documentation for detailles. 
-dc_extrac_cog: {bbox: '-123.3250,51.9500,-120.1473,53.7507',
-                bbox_crs: 'EPSG:4326',
-                collection : 'cdem:dem'}
+ ## Comment/UnComment to add/supress inputs to the function
+
+dc_extrac_cog:
+ _target_: dc_extract.extract_cog.extract_cog.extract_cog
+ bbox: '-123.3250,51.9500,-120.1473,53.7507'
+ bbox_crs: 'EPSG:4326'
+ collections : 'cdem:dem'
 # bbox: '-123.3250,51.9500,-120.1473,53.7507' #Format : 'xMinLeft, yMinLeft, xMaxRigh, yMaxRight' or 
 # collection : 'cdem:dem' # sintax --> 'colection:asset'
 # dc_extract_cog's list of params:
@@ -23,12 +27,14 @@ dc_extrac_cog: {bbox: '-123.3250,51.9500,-120.1473,53.7507',
 # orderby: 'date' 
 # desc: True
 
-dc_search: {name: '\AutomationOutput\example\testSearch.gpkg',
-            bbox: '-123.3250,51.9500,-120.1473,53.7507',
-            collection: 'cdem:dem',
-            dt: None,
-            cols: None,
-            geojson: False}
+dc_search:
+ _target_: dc_extract.extract_cog.extract_cog.search
+ name: '\AutomationOutput\example\testSearch.gpkg'
+ bbox: '-123.3250,51.9500,-120.1473,53.7507'
+ collection: 'cdem:dem'
+ dt: None
+ cols: None
+ geojson: False
 
 # name:str='./data/search/dce.gpkg' --> gpkg to be created with search results. NOTE: Provide full path 
 # urls:list= ['https://datacube.services.geo.ca/api'],
@@ -37,11 +43,11 @@ dc_search: {name: '\AutomationOutput\example\testSearch.gpkg',
 # cols:str=None,
 # geojson:bool=False
 
-dc_description: {name: '.\AutomationOutput\example\description.gpkg'}
-# Default values:
-# name : .\AutomationOutput\example\description.gpkg --> Path and Name for the description file in gpkg format. NOTE: Provide full path
-# urls: ['https://datacube.services.geo.ca/api'] 
-# geojson : False  -->whether to create or not geojson in the output. Default: Flase
+describeCollections: 
+ _target_: dc_extract.describe.describe.collections
+ name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\automationOutput\example\description.gpkg'
+#  urls: ['https://datacube.services.geo.ca/api'] 
+#  geojson : False 
 #________________________________________________________________
-# Values that can be shared by all functions:
+# Values that can be shar ed by all functions:
 date_time : None  # datetime_str_in_ISO_8601_with_Z. (ex. str --> '2011-08-12T20:17:46.384Z') Optional defaults to None. 

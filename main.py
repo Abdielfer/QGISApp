@@ -11,33 +11,22 @@ def dc_describe(cfg: DictConfig):
     '''
     Configurate the call of the d.describe() with hydra parameters.
     '''
-    args = OmegaConf.create(cfg.parameters['dc_description'])
-    d.collections(name = args['name'])
+    instantiate(OmegaConf.create(cfg.parameters['describeCollections']))
     return True
 
 def dc_serach(cfg: DictConfig):
     '''
     Configurate the call of the d.search()  with hydra parameters.
     '''
-    args = OmegaConf.create(cfg.parameters['dc_search'])
-    print(args) 
-    d.search(name= r'C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/AutomationOutput/example/testSearch.gpkg',
-             bbox='-123.3250,51.9500,-120.1473,53.7507',
-             cols= 'cdem',
-             )
-    return True
+    out = instantiate(OmegaConf.create(cfg.parameters['dc_search']))
+    return out
 
 def dc_extraction(cfg: DictConfig):
     '''
-    Configurate the call of the exc.extract_cog() with hydra parameters.
+    Configurate the call of extract_cog() with hydra parameters.
     '''
-    args = OmegaConf.create(cfg.parameters['dc_extrac_cog'])
-    print(args) 
-    # exc.extract_cog(bbox=args['bbox'],
-    #                 bbox_crs= args['bbox_crs'],
-    #                 out_dir= cfg['output_dir'],
-    #                 collections=args['collection'],)
-    return True
+    out = instantiate(OmegaConf.create(cfg.parameters['dc_extrac_cog']))
+    return out
 
 def logger(cfg: DictConfig, nameByTime):
     '''
@@ -53,15 +42,13 @@ def logger(cfg: DictConfig, nameByTime):
 def main(cfg: DictConfig):
     nameByTime = U.makeNameByTime()
     logger(cfg,nameByTime)
-    # d = dc_describe(cfg)
-    # logging.info(f"Description output path: {d}")
-    # print(f"Describe -->{d}")
+    dc_describe(cfg)
     se = dc_serach(cfg)
     logging.info(f"Search output path: {se}")
     print(f"Search-->{se}")
-    # ex = dc_extraction(cfg)
-    # logging.info(f"Extraction output path: {ex}")
-    # print(f"Extraction -->{ex}")
+    ex = dc_extraction(cfg)
+    logging.info(f"Extraction output path: {ex}")
+    print(f"Extraction -->{ex}")
 
 if __name__ == "__main__":
     with U.timeit():
