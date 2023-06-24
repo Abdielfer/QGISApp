@@ -5,8 +5,10 @@ import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 import util as U
-import logging
-# from wbw_test import checkIn as chI   ##IMPORTANT: DO NOT USE. If two instance are created it can kill my license. Thank you!!
+import logging 
+from wbw_test import checkIn as chIn   ##IMPORTANT: DO NOT USE. If two instance are created it can kill my license. Thank you!!
+import rasterManipulation
+
 
 def dc_describe(cfg: DictConfig):
     '''
@@ -42,12 +44,13 @@ def logger(cfg: DictConfig, nameByTime):
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     nameByTime = U.makeNameByTime()
-    logger(cfg,nameByTime)
-    # dc_describe(cfg)
-    # dc_serach(cfg)
-    ex = dc_extraction(cfg)
-    logging.info(f"Extraction output path: {ex}")
-
+    # logger(cfg,nameByTime)
+    # # dc_describe(cfg)
+    # # dc_serach(cfg)
+    # ex = dc_extraction(cfg)
+    # logging.info(f"Extraction output path: {ex}")
+    instantiate(OmegaConf.create(cfg.transformation['clipRaster']))
+    chIn 
 
 if __name__ == "__main__":
     with U.timeit():

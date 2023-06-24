@@ -7,6 +7,10 @@ from torchgeo.datasets.utils import download_url
 import rasterio as rst
 from rasterio.crs import CRS
 
+
+
+
+
 ## LocalPaths and global variables: to be adapted to your needs ##
 currentDirectory = os.getcwd()
 wbt = WhiteboxTools()
@@ -370,6 +374,28 @@ class generalRasterTools():
         return str(self.workingDir)
 
 
+####  Clip raster
+
+#WbW. TO SLOWLY  Tobe checked.  
+def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = False ):
+        wbt.clip_raster_to_polygon(
+            inputRaster, 
+            maskVector, 
+            outPath, 
+            maintainDim, 
+            callback=default_callback
+            )
+
+def clipRasterGdal(ras_in,shp_in,ras_out):
+    """
+    ras_in='C:/Users/schol/montreal_500m.tif'
+    shp_in="C:/Users/schol/mypo.shp"
+    ras_out='C:/Users/schol/montreal_clip.tif
+    '"""
+
+    return 
+
+
 
 # Helpers
 def setWBTWorkingDir(workingDir):
@@ -391,6 +417,8 @@ def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
         for url in tail_URL_NamesList:
             download_url(url, confirmedLocalPath)
         print(f"Tails downloaded to: {confirmedLocalPath}")
+
+
 
 #### Exceutable 
 def main():
