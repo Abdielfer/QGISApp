@@ -6,7 +6,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging 
-from wbw_test import checkIn as chIn   ##IMPORTANT: DO NOT USE. If two instance are created it can kill my license. Thank you!!
+# from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance the license are created it can kill my license. Thank you!!
 import rasterManipulation
 
 
@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
     # ex = dc_extraction(cfg)
     # logging.info(f"Extraction output path: {ex}")
     instantiate(OmegaConf.create(cfg.transformation['clipRaster']))
-    chIn 
+    # chIn   # To check in the wbtools license
 
 if __name__ == "__main__":
     with U.timeit():

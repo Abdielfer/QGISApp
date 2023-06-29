@@ -1,20 +1,16 @@
 import os
 import glob
 import pathlib
-import joblib
 import shutil
 import time
-import random
-import math
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-
 import rasterio as rio
 from rasterio.plot import show_hist
 from datetime import datetime
-from collections import Counter
+import pcraster as pcr
 
 ### General applications ##
 class timeit(): 
@@ -282,7 +278,7 @@ def reshape_as_raster(arr):
 
 def readRaster(rasterPath:os.path):
     '''
-    Read a raster qith Rasterio.
+    Read a raster with Rasterio.
     return:
      Raster data as np.array
      Raster.profile: dictionary with all rater information
@@ -343,5 +339,37 @@ def computeRaterStats(rasterPath:os.path):
 
 
 ######################
-#### WhitBoxTools ####
+####   PCRaster   ####
 ######################
+
+def computeHAND(DEMPath,HANDPath, saveLowDirc:bool=True, saveStrahOrder:bool=True,saveSubCath:bool = True): 
+    pcr.setclone(DEMPath)
+    DEM = pcr.readmap(DEMPath)
+    ## Flow Direcction (Use to take long...)
+    threshold = 8
+    FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
+    if saveLowDirc:
+        pcr.report(FlowDir, 'data\ldd.map')
+    ## Strahler order 
+    print('Strahler order...')
+    strahlerOrder = streamorder(FlowDir)
+    strahlerRiver = ifthen(strahlerOrder>=threshold,strahlerOrder)
+    if saveStrahOrder:
+        pcr.report(strahlerRiver, 'data\strahlerRiver.map')
+    ## Finding outlets
+    print('Finding outlets...')
+    junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
+    outlets = ordinal(cover(uniqueid(junctions),0))
+    print('Calculating subcatchment')
+    subCatchments = catchment(FlowDir,outlets)
+    if saveSubCath:
+        pcr.report(subCatchments,'data\subCathments.map')
+    print('Ready to print')
+    aguila(subCatchments)
+    print('Computing HAND')
+    areaMin = areaminimum(DEM,subCatchments)
+    aguila(areaMin)
+    pcr.report(areaMin,'data\z_drainage.map')
+    HAND = DEM - areaMin
+    aguila(HAND)
+    pcr.report(HAND,HANDPath)

@@ -6,10 +6,12 @@ import whitebox_workflows as wbw
 from torchgeo.datasets.utils import download_url
 import rasterio as rst
 from rasterio.crs import CRS
+from osgeo import gdal
+from osgeo.gdalconst import *
 
-
-
-
+#########################
+####   WhiteBoxTools  ###
+#########################
 
 ## LocalPaths and global variables: to be adapted to your needs ##
 currentDirectory = os.getcwd()
@@ -228,7 +230,7 @@ class generalRasterTools():
         verifiedOutpouFileName = checkTifExtention(outputRaster)
         outputFilePathAndName = os.path.join(wbt.work_dir,verifiedOutpouFileName)
         if isinstance(inputRaster, list):
-            inputs = generalRasterTools.prepareInputForResampler(inputRaster)
+            inputs = sefl.prepareInputForResampler(inputRaster)
         else: 
             inputs = inputRaster        
         wbt.resample(
@@ -266,9 +268,9 @@ class generalRasterTools():
         resamplerOutput_CRS_OK = U.makePath(destinationFolder,(name +'_'+str(outputResolution)+'m_CRS_OK.tif'))
         setWBTWorkingDir(transitFolderPath)
         dtmTail = U.listFreeFilesInDirByExt(transitFolderPath, ext = '.tif')
-        crs,_ = generalRasterTools.get_CRSAndTranslation_GTIFF(self,dtmFtpList[0])
-        generalRasterTools.rasterResampler(self,dtmTail,resamplerOutput,outputResolution)
-        generalRasterTools.set_CRS_GTIF(self,resamplerOutput, resamplerOutput_CRS_OK, crs)
+        crs,_ = self.get_CRSAndTranslation_GTIFF(self,dtmFtpList[0])
+        self.rasterResampler(self,dtmTail,resamplerOutput,outputResolution)
+        self.set_CRS_GTIF(self,resamplerOutput, resamplerOutput_CRS_OK, crs)
         setWBTWorkingDir(savedWDir)
         if clearTransitDir: 
             U.clearTransitFolderContent(transitFolderPath)
@@ -325,14 +327,15 @@ class generalRasterTools():
             return input_crs, input_gt  
 
     def set_CRS_GTIF(self,input_gtif, output_tif, in_crs):
-        arr, kwds = generalRasterTools.separate_array_profile(self, input_gtif)
+        arr, kwds = self.separate_array_profile(self, input_gtif)
         kwds.update(crs=in_crs)
         with rst.open(output_tif,'w', **kwds) as output:
             output.write(arr)
         return output_tif
 
     def set_Tanslation_GTIF(self, input_gtif, output_tif, in_gt):
-        arr, kwds = generalRasterTools.separate_array_profile(self, input_gtif)
+        arr, kwds = sel
+        .separate_array_profile(self, input_gtif)
         kwds.update(transform=in_gt)
         with rst.open(output_tif,'w', **kwds) as output:
             output.write(arr)
@@ -373,10 +376,7 @@ class generalRasterTools():
     def get_WorkingDir(self):
         return str(self.workingDir)
 
-
-####  Clip raster
-
-#WbW. TO SLOWLY  Tobe checked.  
+#WbW. TO SLOW: To be checked.  
 def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = False ):
         wbt.clip_raster_to_polygon(
             inputRaster, 
@@ -386,13 +386,86 @@ def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = 
             callback=default_callback
             )
 
+
+#########################
+#####   GDAL Tools  #####
+#########################
+
+class importRasterGDAL():
+    '''
+    Some info about GDAL deo Transform
+    adfGeoTransform[0] /* top left x */
+    adfGeoTransform[1] /* w-e pixel resolution */
+    adfGeoTransform[2] /* rotation, 0 if image is "north up" */
+    adfGeoTransform[3] /* top left y */
+    adfGeoTransform[4] /* rotation, 0 if image is "north up" */
+    adfGeoTransform[5] /* n-s pixel resolution */
+    
+    '''
+    def __init__(self, rasterPath) -> None:
+        gdal.AllRegister() # register all of the drivers
+        gdal.DontUseExceptions()
+        self.ds = gdal.Open(rasterPath)
+        if self.ds is None:
+            print('Could not open image')
+            sys.exit(1)   
+        # get image size
+        self.rows = self.ds.RasterYSize
+        self.cols = self.ds.RasterXSize
+        self.NumOfBands = self.ds.RasterCount
+        # get georeference info
+        transform = self.ds.GetGeoTransform()
+        self.xOrigin = transform[0]
+        self.yOrigin = transform[3]
+        self.pixelWidth = transform[1]
+        self.pixelHeight = transform[5]
+        self.projection = self.ds.GetProjection()
+        self.MetaData = self.ds.GetMetadata()
+        self.band1 = self.ds.GetRasterBand(1)
+        self.NoData = self.band1.GetNoDataValue()
+
+    def setDirGDAL(self, path ):
+        os.chdir()
+    
+    def getRasterDataset(self):
+        return self.ds 
+   
+    def getRasterNpArray(self, maskNoData:bool = True)-> np.array:
+        arr = self.ds.ReadAsArray()
+        if maskNoData:
+            arr = np.ma.masked_equal(arr, self.NoData)
+        return arr
+    
+    def computePixelOffset(self,x,y):
+        # compute pixel offset
+        xOffset = int((x - self.xOrigin) / self.pixelWidth)
+        yOffset = int((y - self.yOrigin) / self.pixelHeight)
+        return xOffset, yOffset
+
+    def closeRaster(self):
+        self.ds = None
+
+    def printRaster(self):
+        print("---- Image size ----")
+        print(f"Row : {self.rows}")
+        print(f"Cols : {self.cols}")
+        print(f"xOrigin : {self.xOrigin}")
+        print(f"yOrigin : {self.yOrigin}") 
+        print(f"NumOfBands : {self.NumOfBands}")
+        print(f"pixelWidth : {self.pixelWidth}")
+        print(f"pixelHeight : {self.pixelHeight}")
+        print(f"projection : {self.projection}")
+        print(f"MetaData : {self.MetaData}")
+    
+
+## Clip raster With GDAL: To be implemented
 def clipRasterGdal(ras_in,shp_in,ras_out):
     """
     ras_in='C:/Users/schol/montreal_500m.tif'
     shp_in="C:/Users/schol/mypo.shp"
     ras_out='C:/Users/schol/montreal_clip.tif
     '"""
-
+       
     return 
 
 
@@ -419,8 +492,7 @@ def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
         print(f"Tails downloaded to: {confirmedLocalPath}")
 
 
-
-#### Exceutable 
+#### Excecutable 
 def main():
     wbe = wbw.WbEnvironment()
     print(wbe.version())
