@@ -6,9 +6,8 @@ clipRaster:
  outPath : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_WShed2_dtm.tiff'
  maintainDim : False
 
-
-# clipRasterGdal:
-#   _target_ : rasterManipulation.clipRasterGdal
-#   ras_in : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\cdem-canada-dem-clip-3979-BC_Quesnel.tif'
-#   shp_in : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_WShed2.shp'
-#   ras_out : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_WShed2_dtm.tiff' 
+clipRasterGdal:
+  _target_ : util.clipRasterGdal
+  ras_in : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\cdem-canada-dem-clip-3979-BC_Quesnel.tif'
+  mask : 'C:\Users\abfernan\CrossCanFloodMapping\PCRasterPython\data\BC_Quesnell_WSh2.shp'
+  ras_out : 'C:\Users\abfernan\CrossCanFloodMapping\PCRasterPython\data\BC_Quesnel_GDAL_CLipped.tiff' 
