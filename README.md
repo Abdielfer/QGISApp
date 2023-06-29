@@ -3,7 +3,7 @@
 ### Settings:
  - Clone repository: 
    # Adding dc_extract to the repo. Two options:
-        1 - Clone the cd_extract repo OUTSIDE your GISAutomation file. Make a copy of dc_extract into yor GISAutomation file. I necesary, "remouve remote" to the dc_extract into your repo, to avoid conflicts with Git operations. 
+        1 - Clone the cd_extract repo OUTSIDE your GISAutomation file. Make a copy of "dc_extract" into your GISAutomation file. If necesary, "remouve remote" from "dc_extract" into your repo, to avoid conflicts with Git operations. 
         2- OR: Add dc_extract as submodule into your GISAutomation local repo. 
  - Create Conda environment:
     1.Create a conda env from the datacue-extract.yml located into the dc_extract folder. Choose your OS. 
