@@ -18,7 +18,7 @@
 - Input: bbox=(xMin,yMin, xMax,yMax), 
 - Output: collection/asset subset (*.tif, *.shp, *.gpkg  or other specific format from the collection/asset)
 
-2- Clip the extracted subset with a mask if needed.(Ex. catchment extraction from a DEM using a *.shp file with a basin polygon as mask). NOTE: In progress to determine the best options to clip rasters. 
+2- Clip the extracted subset with a mask if needed.(Ex. catchment extraction from a DEM using a *.shp file with a basin polygon as mask. NOTE: util.clipRasterGdal() is tested.) 
 
 3- Performe the desired operation on the extracted subset.(Ex. From a DEM computes slope, flow accumulation, river network extraction, HAND coefficient, etc.  -->>> 
         ex. util.computeHAND(DEMPath,HANDPath)) 
