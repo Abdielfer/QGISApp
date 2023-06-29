@@ -14,7 +14,7 @@
 
 
 ### Data flow Chart:
-1- Extraction of a subset from a data collection/asset with dc_extraction tools. Subset defined by bounding box or *.gpkg file.   (NOTE: From experinece, works better with bbox.) 
+1- Extraction of a subset from a data collection/asset with dc_extraction tools. Subset defined by bounding box or *.gpkg file.   (NOTE: From experience, works better with bbox.) 
 - Input: bbox=(xMin,yMin, xMax,yMax), 
 - Output: collection/asset subset (*.tif, *.shp, *.gpkg  or other specific format from the collection/asset)
 
