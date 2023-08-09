@@ -1,7 +1,6 @@
 name: GICAutomation
 channels:
   - conda-forge
-  - pip
 dependencies:
   - python=3.9.13
   - numpy=1.23.2
