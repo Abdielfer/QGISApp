@@ -1,4 +1,4 @@
-import os
+import os, ntpath
 import glob
 import pathlib
 import shutil
@@ -14,6 +14,7 @@ from whitebox.whitebox_tools import WhiteboxTools, default_callback
 import whitebox_workflows as wbw   
 from torchgeo.datasets.utils import download_url
 from osgeo import gdal
+from osgeo import gdal_array
 from osgeo.gdalconst import *
 import pcraster as pcr
 from pcraster import *
@@ -198,6 +199,15 @@ def splitFilenameAndExtention(file_path):
     name = fpath.stem
     return name, extention 
 
+def replaceExtention(inPath,NewExt):
+    '''
+    Just remember to add the poin to the new ext -> '.map'
+    '''
+    dir,fileName = ntpath.split(inPath)
+    _,actualExt = ntpath.splitext(fileName)
+    newName= os.path.join(dir,ntpath.basename(inPath).replace(actualExt,NewExt))
+    return newName
+
 def get_parenPath_name_ext(filePath):
     '''
     Ex: user/folther/file.txt
@@ -328,6 +338,7 @@ def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> 
     return rasterDataNan
 
 def computeRaterStats(rasterPath:os.path):
+
     '''
     Read a reaste and return: 
     @Return
@@ -351,37 +362,43 @@ def computeRaterStats(rasterPath:os.path):
 
 def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,saveSubCath:bool = False): 
     '''
-    This function is based on PCRaster library. 
-    Requirements: Raster MUST be *.map format to be processed. 
+    1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
+    2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
+    3- Read DEM in PCRasterformat
+    4- Compute flow direction with d8 algorithm -> lddcreate()
+    5- Compute strahler Order-> streamorder(FlowDir)
     '''
-    pcr.setclone(DEMPath)
-    DEM = pcr.readmap(DEMPath)
+    DEMMap = saveTiffAsPCRaster(DEMPath)
+    pcr.setclone(DEMMap)
+    print(DEMMap)
+    DEM = pcr.readmap(DEMMap)
     ## Flow Direcction (Use to take long...)
+    print("#####......Computing DInf flow dir.......######")
     threshold = 8
     FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
-    if saveLowDirc:
-        pcr.report(FlowDir, 'data\ldd.map')
-    ## Strahler order 
-    print('Strahler order...')
+    if saveDDL: 
+        pcr.report(FlowDir,'data\ddl.map')
+    print('#####......Computing Strahler order.......######')
     strahlerOrder = streamorder(FlowDir)
     strahlerRiver = ifthen(strahlerOrder>=threshold,strahlerOrder)
     if saveStrahOrder:
         pcr.report(strahlerRiver, 'data\strahlerRiver.map')
-    ## Finding outlets
-    print('Finding outlets...')
+    print('#####......Finding outlets.......######')
     junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
     outlets = ordinal(cover(uniqueid(junctions),0))
-    print('Calculating subcatchment')
+    print('#####......Calculating subcatchment.......######')
     subCatchments = catchment(FlowDir,outlets)
     if saveSubCath:
         pcr.report(subCatchments,'data\subCathments.map')
-    print('Ready to print')
-    aguila(subCatchments)
-    print('Computing HAND')
+    print('#####......Computing HAND.......######')
     areaMin = areaminimum(DEM,subCatchments)
     HAND = DEM - areaMin
     pcr.report(HAND,HANDPath)
-
+    print('#####......Ready to print.......######')
+    aguila(HAND)
+    aguila(subCatchments)
+    aguila(areaMin)
+    
 
 #########################
 ####   WhiteBoxTools  ###
@@ -394,7 +411,7 @@ wbt.set_working_dir(currentDirectory)
 wbt.set_verbose_mode(True)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
-## Pretraitment #
+    ## Pretraitment #
 class dtmTransformer():
     '''
      This class contain some functions to generate geomorphological and hydrological features from DTM.
@@ -758,17 +775,10 @@ def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = 
             maintainDim, 
             callback=default_callback
             )
-
-
-#########################
-#####   GDAL Tools  #####
-#########################
-
-class importRasterGDAL():
+####   GDAL Tools  ###
+class RasterGDAL():
     '''
-    This is a Tool to import a raster and have a detailed information from it. 
-
-    Some info about GDAL GeoTransform
+    Some info about GDAL deo Transform
     adfGeoTransform[0] /* top left x */
     adfGeoTransform[1] /* w-e pixel resolution */
     adfGeoTransform[2] /* rotation, 0 if image is "north up" */
@@ -780,6 +790,7 @@ class importRasterGDAL():
     def __init__(self, rasterPath) -> None:
         gdal.AllRegister() # register all of the drivers
         gdal.DontUseExceptions()
+        self.inputPath = rasterPath
         self.ds = gdal.Open(rasterPath)
         if self.ds is None:
             print('Could not open image')
@@ -820,6 +831,18 @@ class importRasterGDAL():
     def closeRaster(self):
         self.ds = None
 
+    def translateRaster(self, outpPath, format:str = "GeoTiff"):
+        """
+        Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
+        """
+        gdal.Translate(outpPath,self.ds,format=format)
+        return True
+
+    def saveTiffAsPCRaster(self):
+        outpPath = ntpath.basename(self.inputPath).replace('.tif','.map') 
+        gdal.Translate(outpPath,self.ds,format='PCRaster')
+        return outpPath
+
     def printRaster(self):
         print("---- Image size ----")
         print(f"Row : {self.rows}")
@@ -832,21 +855,42 @@ class importRasterGDAL():
         print(f"projection : {self.projection}")
         print(f"MetaData : {self.MetaData}")
 
-## Clip raster With GDAL: To be implemented
+###  GDAL independent functions
+def translateRaster(inPath, outpPath, format:str = "GeoTiff"):
+        """
+        Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
+        """
+        gdal.Translate(outpPath,inPath,format=format)
+        return True
+
+def saveTiffAsPCRaster(inputPath):
+        outpPath = replaceExtention(inputPath,'.map')
+        gdal.Translate(outpPath,inputPath,format='PCRaster')
+        return outpPath
+
+def readRasterAsArry(rasterPath):
+   return gdal_array.LoadFile(rasterPath)
+
+def reprojectRaster(outMap,inMap, kwargs):
+    '''
+    kwargs example: kwargs = {'format': 'GTiff', 'geoloc': True}
+    '''
+    ds = gdal.Warp(outMap, inMap, **kwargs)
+    del ds
+    return outMap
+
+## Clip raster With GDAL: Tested OK
 def clipRasterGdal(ras_in,mask,ras_out):
     """
     TESTED: OK
     ras_in='C:/Users/schol/montreal_500m.tif'
-    shp_in="C:/Users/schol/mypo.shp"
+    mask -> shp_in="C:/Users/schol/mypo.shp"
     ras_out='C:/Users/schol/montreal_clip.tif
     
     NOTE: If not output CRS is specified, the output takes the input CRS. 
     """
-    gdal.Warp(ras_out,ras_in, cutlineDSName = mask, cropToCutline =True)
-       
-    return 
-
-
+    gdal.Warp(ras_out,ras_in, cutlineDSName = mask, cropToCutline =True)  
+    return ras_out
 
 # Helpers
 def setWBTWorkingDir(workingDir):

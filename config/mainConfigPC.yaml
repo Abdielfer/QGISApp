@@ -1,7 +1,7 @@
 
 defaults:
   - parameters : dc_extractParamsCanvas  #Define which config to call. 
-  - transformation : wbwTools  # Define which transformations tools to call
+  - transformation : rasterTools # Define which raster transformations tools to call
   - _self_
 
 work_dir: ${hydra:runtime.cwd}  # where the code is executed
