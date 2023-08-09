@@ -8,7 +8,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import rasterio as rio
-from rasterio.crs import CRS
 from rasterio.plot import show_hist
 from datetime import datetime
 from whitebox.whitebox_tools import WhiteboxTools, default_callback
@@ -350,7 +349,7 @@ def computeRaterStats(rasterPath:os.path):
 ####   PCRaster   ####
 ######################
 
-def computeHAND(DEMPath,HANDPath, saveLowDirc:bool=True, saveStrahOrder:bool=True,saveSubCath:bool = True): 
+def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,saveSubCath:bool = False): 
     '''
     This function is based on PCRaster library. 
     Requirements: Raster MUST be *.map format to be processed. 
@@ -380,10 +379,7 @@ def computeHAND(DEMPath,HANDPath, saveLowDirc:bool=True, saveStrahOrder:bool=Tru
     aguila(subCatchments)
     print('Computing HAND')
     areaMin = areaminimum(DEM,subCatchments)
-    aguila(areaMin)
-    pcr.report(areaMin,'data\z_drainage.map')
     HAND = DEM - areaMin
-    aguila(HAND)
     pcr.report(HAND,HANDPath)
 
 
