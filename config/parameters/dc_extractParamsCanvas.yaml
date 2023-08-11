@@ -15,7 +15,7 @@ dc_extrac_cog:
 #  resolution: 16 # int
  method: 'bilinear' #str 
 #  out_crs: 'EPSG:4326' #str
- out_dir: C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\'
+ out_dir: C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\
  suffix: BC_Quesnel # str
 # datetime_filter: None # str
 # resolution_filter: None # str

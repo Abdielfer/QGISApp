@@ -21,14 +21,14 @@ def logger(cfg: DictConfig, nameByTime):
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
-    nameByTime = U.makeNameByTime()
-    logger(cfg,nameByTime)
-    shpFile = cfg.transformation['mask']
-    bbox = U.get_Shpfile_bbox(shpFile)
-    print(f"The bbox is: {bbox}")
+    # nameByTime = U.makeNameByTime()
+    # logger(cfg,nameByTime)
+    # shpFile = cfg.transformation['mask']
+    # bbox = U.get_Shpfile_bbox(shpFile)
+    # print(f"The bbox is: {bbox}")
     # U.dc_describe(cfg)
     # U.dc_serach(cfg)
-    # ex = U.dc_extraction(cfg)
+    # U.dc_extraction(cfg)
     # logging.info(f"Extraction output path: {ex}")
     # instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
     # chIn   # To check in the wbtools license
@@ -36,8 +36,14 @@ def main(cfg: DictConfig):
     # cliped = instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
     # cliped = U.clipRasterGdal(ras_in,mask,ras_out)
     # U.reproject_tif(cliped,'EPSG:4326')
-    cropTif = instantiate(OmegaConf.create(cfg.transformation['crop_tif']))
-    U.reproject_tif(cropTif,'EPSG:4326')
+    config = OmegaConf.create(cfg.transformation['crop_tif'])
+    tif = config['tif_file']
+    # rastOut = U.RasterGDAL(tif)
+    # rastOut.printRaster()
+    config['tif_file'] = U.reproject_tif(tif,'EPSG:4326')
+    cropTif = instantiate(config)
+    print(f"cropTif: {cropTif}")
+    
 
 if __name__ == "__main__":
     with U.timeit():

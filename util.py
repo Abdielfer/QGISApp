@@ -888,7 +888,7 @@ def reprojectRaster(outMap,inMap, kwargs):
     del ds
     return outMap
 
-def reproject_tif(tif_file, output_crs):
+def reproject_tif(tif_file, output_crs) -> str:
     """
     Reprojects a TIFF file to the specified coordinate reference system (CRS).
 
@@ -909,12 +909,9 @@ def reproject_tif(tif_file, output_crs):
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
-    # Create a transformation object to convert from input CRS to output CRS
-    transform = osr.CoordinateTransformation(input_srs, output_srs)
-    # Get the output file path
     output_file = os.path.splitext(tif_file)[0] + '_reproj.tif'
     # Create the output dataset
-    gdal.Warp(output_file, dataset, dstSRS=output_srs, srcSRS=input_srs, resampleAlg=gdal.GRA_Bilinear)
+    gdal.Warp(output_file, dataset, dstSRS=output_srs, srcSRS=input_srs, resampleAlg=gdal.GRA_Bilinear,)
     # Close the datasets
     dataset = None
     return output_file
@@ -929,26 +926,31 @@ def crop_tif(tif_file, shapefile, output_file)-> str:
     Returns:
         str: Path to the output TIFF file.
     """
+    print(f'Into crop_tif, tif_file: {tif_file}')
     # Open the input TIFF file
-    dataset, _ = readRaster(tif_file)
-    count,cols,rows = dataset.shape
+    dataset = gdal.Open(tif_file)
+    cols = dataset.RasterXSize
+    rows = dataset.RasterYSize
+    count = dataset.RasterCount
+    datatype = gdal.GetDataTypeName(dataset.GetRasterBand(1).DataType)
     print(f'cols,rows: {cols}:--{rows}')
+    print(f'datatype: {datatype}')
     # Open the shapefile
     shapefile_ds = ogr.Open(shapefile)
     layer = shapefile_ds.GetLayer()
     # Get the extent of the shapefile
     extent = layer.GetExtent()
+    print(f'extent: {extent}')
     # Set the output file format
     driver = gdal.GetDriverByName('GTiff')
     # Create the output dataset
-    output_dataset = driver.Create(output_file, cols,rows,count,dataset.GetRasterBand(1).DataType)
+    output_dataset = driver.Create(output_file, cols,rows,count, gdal.GDT_Float32)
     # Set the geotransform and projection
     output_dataset.SetGeoTransform(dataset.GetGeoTransform())
     output_dataset.SetProjection(dataset.GetProjection())
-    # Set the output dataset extent to the shapefile extent
-    output_dataset.SetExtent(*extent)
     # Perform the cropping
-    gdal.Warp(output_dataset, dataset, cutlineDSName=shapefile, cropToCutline=True)
+    print(f'output_dataset: {output_dataset}')
+    gdal.Warp(output_dataset, dataset, outputBounds=extent, cutlineDSName=shapefile, cropToCutline=True, dstNodata=-9999)
     # Close the datasets
     dataset = None
     output_dataset = None
@@ -964,20 +966,6 @@ def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
         min_x, max_x, min_y, max_y = extent
 
         return min_x, min_y, max_x, max_y
-
-## Clip raster With GDAL: Tested OK
-def clipRasterGdal(ras_in,mask,ras_out):
-    """
-    TESTED: OK
-    ras_in='C:/Users/schol/montreal_500m.tif'
-    mask -> shp_in="C:/Users/schol/mypo.shp"
-    ras_out='C:/Users/schol/montreal_clip.tif
-    
-    NOTE: If not output CRS is specified, the output takes the input CRS. 
-    """
-    gdal.Warp(ras_out,ras_in, cutlineDSName = mask, cropToCutline =True)  
-    return ras_out
-
 
     ############################
     #### Datacube_ Extract  ####
