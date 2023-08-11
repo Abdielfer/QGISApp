@@ -1,4 +1,5 @@
 # import dc_extract
+import os
 import dc_extract.describe.describe as d
 from dc_extract.extract_cog import extract_cog as exc
 import hydra 
@@ -7,28 +8,6 @@ from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging 
 # from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance the license are created it can kill my license. Thank you!!
-
-
-def dc_describe(cfg: DictConfig):
-    '''
-    Configurate the call of d.describe() with hydra parameters.
-    '''
-    instantiate(OmegaConf.create(cfg.parameters['dc_describeCollections']))
-    return True
-
-def dc_serach(cfg: DictConfig):
-    '''
-    Configurate the call of d.search()  with hydra parameters.
-    '''
-    out = instantiate(OmegaConf.create(cfg.parameters['dc_search']))
-    return out
-
-def dc_extraction(cfg: DictConfig):
-    '''
-    Configurate the call of extract_cog() with hydra parameters.
-    '''
-    out = instantiate(OmegaConf.create(cfg.parameters['dc_extrac_cog']))
-    return out
 
 def logger(cfg: DictConfig, nameByTime):
     '''
@@ -42,14 +21,23 @@ def logger(cfg: DictConfig, nameByTime):
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
-    # nameByTime = U.makeNameByTime()
-    # logger(cfg,nameByTime)
-    # # dc_describe(cfg)
-    # # dc_serach(cfg)
-    # ex = dc_extraction(cfg)
+    nameByTime = U.makeNameByTime()
+    logger(cfg,nameByTime)
+    shpFile = cfg.transformation['mask']
+    bbox = U.get_Shpfile_bbox(shpFile)
+    print(f"The bbox is: {bbox}")
+    # U.dc_describe(cfg)
+    # U.dc_serach(cfg)
+    # ex = U.dc_extraction(cfg)
     # logging.info(f"Extraction output path: {ex}")
-    instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
+    # instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
     # chIn   # To check in the wbtools license
+
+    # cliped = instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
+    # cliped = U.clipRasterGdal(ras_in,mask,ras_out)
+    # U.reproject_tif(cliped,'EPSG:4326')
+    cropTif = instantiate(OmegaConf.create(cfg.transformation['crop_tif']))
+    U.reproject_tif(cropTif,'EPSG:4326')
 
 if __name__ == "__main__":
     with U.timeit():

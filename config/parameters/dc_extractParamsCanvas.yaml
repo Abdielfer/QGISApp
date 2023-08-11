@@ -15,7 +15,7 @@ dc_extrac_cog:
 #  resolution: 16 # int
  method: 'bilinear' #str 
 #  out_crs: 'EPSG:4326' #str
- out_dir: 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel'
+ out_dir: C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\'
  suffix: BC_Quesnel # str
 # datetime_filter: None # str
 # resolution_filter: None # str
@@ -34,7 +34,6 @@ dc_search:
  cols: 'cdem'
 #  geojson: False
 
-
 dc_describeCollections: 
  _target_: dc_extract.describe.describe.collections
  name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example\description.gpkg'
@@ -43,3 +42,5 @@ dc_describeCollections:
 #________________________________________________________________
 # Values that can be shar ed by all functions:
 date_time : None  # datetime_str_in_ISO_8601_with_Z. (ex. str --> '2011-08-12T20:17:46.384Z') Optional defaults to None. 
+
+ 

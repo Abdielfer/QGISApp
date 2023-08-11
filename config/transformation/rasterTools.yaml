@@ -1,13 +1,22 @@
 ## 
 clipRaster:
- _target_: rasterManipulation.clip_raster_to_polygon
- inputRaster: 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\cdem-canada-dem-clip-3979-BC_Quesnel.tif'
- maskVector:  'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_WShed2.shp'
- outPath : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_WShed2_dtm.tiff'
- maintainDim : False
+  _target_: rasterManipulation.clip_raster_to_polygon
+  inputRaster: 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\cdem-canada-dem-clip-3979-BC_Quesnel.tif'
+  maskVector:  'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_WShed2.shp'
+  outPath : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\BC_Quesnel_WShed2_dtm.tiff'
+  maintainDim : False
 
 clipRasterGdal:
   _target_ : util.clipRasterGdal
-  ras_in : 'C:\Users\abfernan\CrossCanFloodMapping\dc_extract_outputLocal\BC_Quesnel\cdem-canada-dem-clip-3979-BC_Quesnel.tif'
-  mask : 'C:\Users\abfernan\CrossCanFloodMapping\PCRasterPython\data\BC_Quesnell_WSh2.shp'
-  ras_out : 'C:\Users\abfernan\CrossCanFloodMapping\PCRasterPython\data\BC_Quesnel_GDAL_CLipped.tiff' 
+  ras_in : 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\cdem-canada-dem-clip-3979-BC_Quesnel.tif'
+  mask : 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp' 
+  ras_out : 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\Quesnel_GDAL_CLipped.tif' 
+
+crop_tif:
+  _target_ : util.crop_tif
+  tif_file : 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\cdem-canada-dem-clip-3979-BC_Quesnel.tif'
+  shapefile : 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp' 
+  output_file : 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\Quesnel_basinCropTif.tif' 
+
+# Add a shpe file path to use as a mask for the raster extraction.
+mask: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp' # str. Optional defaults to None.

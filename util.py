@@ -3,6 +3,8 @@ import glob
 import pathlib
 import shutil
 import time
+from time import strftime
+from typing import Tuple
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,11 +15,14 @@ from datetime import datetime
 from whitebox.whitebox_tools import WhiteboxTools, default_callback
 import whitebox_workflows as wbw   
 from torchgeo.datasets.utils import download_url
-from osgeo import gdal
+from osgeo import gdal,ogr, osr
 from osgeo import gdal_array
 from osgeo.gdalconst import *
 import pcraster as pcr
 from pcraster import *
+
+from omegaconf import DictConfig, OmegaConf
+from hydra.utils import instantiate
 
 ### General applications ##
 class timeit(): 
@@ -31,8 +36,8 @@ class timeit():
     def __exit__(self, *args, **kwargs):
         print('runtime: {}'.format(datetime.now() - self.tic))
 
-def makeNameByTime()->str:
-    name = time.strftime("%y%m%d%H%M")
+def makeNameByTime():
+    name = strftime("%y%m%d%H%M")
     return name
 
 ### Configurations And file management
@@ -293,7 +298,7 @@ def reshape_as_raster(arr):
     '''
     return np.transpose(arr, [2, 0, 1])
 
-def readRaster(rasterPath:os.path):
+def readRaster(rasterPath:os.path) -> tuple[np.array, dict]:
     '''
     Read a raster with Rasterio.
     return:
@@ -775,7 +780,11 @@ def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = 
             maintainDim, 
             callback=default_callback
             )
+
+######################
 ####   GDAL Tools  ###
+######################
+
 class RasterGDAL():
     '''
     Some info about GDAL deo Transform
@@ -910,52 +919,51 @@ def reproject_tif(tif_file, output_crs):
     dataset = None
     return output_file
 
-def crop_tif(tif_file, shapefile, output_file):
+def crop_tif(tif_file, shapefile, output_file)-> str:
     """
     Crops a TIFF file using a shapefile as a mask.
-
     Args:
         tif_file (str): Path to the input TIFF file.
         shapefile (str): Path to the input shapefile.
         output_file (str): Path to the output TIFF file.
-
     Returns:
         str: Path to the output TIFF file.
     """
     # Open the input TIFF file
-    dataset = gdal.Open(tif_file)
-
+    dataset, _ = readRaster(tif_file)
+    count,cols,rows = dataset.shape
+    print(f'cols,rows: {cols}:--{rows}')
     # Open the shapefile
     shapefile_ds = ogr.Open(shapefile)
     layer = shapefile_ds.GetLayer()
-
     # Get the extent of the shapefile
     extent = layer.GetExtent()
-
     # Set the output file format
     driver = gdal.GetDriverByName('GTiff')
-
     # Create the output dataset
-    output_dataset = driver.Create(output_file, dataset.RasterXSize, dataset.RasterYSize, dataset.RasterCount, dataset.GetRasterBand(1).DataType)
-
+    output_dataset = driver.Create(output_file, cols,rows,count,dataset.GetRasterBand(1).DataType)
     # Set the geotransform and projection
     output_dataset.SetGeoTransform(dataset.GetGeoTransform())
     output_dataset.SetProjection(dataset.GetProjection())
-
     # Set the output dataset extent to the shapefile extent
     output_dataset.SetExtent(*extent)
-
     # Perform the cropping
     gdal.Warp(output_dataset, dataset, cutlineDSName=shapefile, cropToCutline=True)
-
     # Close the datasets
     dataset = None
     output_dataset = None
     shapefile_ds = None
-
     return output_file
 
+def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
+        driver = ogr.GetDriverByName('ESRI Shapefile')
+        data_source = driver.Open(file_path, 0)
+        layer = data_source.GetLayer()
 
+        extent = layer.GetExtent()
+        min_x, max_x, min_y, max_y = extent
+
+        return min_x, min_y, max_x, max_y
 
 ## Clip raster With GDAL: Tested OK
 def clipRasterGdal(ras_in,mask,ras_out):
@@ -969,6 +977,36 @@ def clipRasterGdal(ras_in,mask,ras_out):
     """
     gdal.Warp(ras_out,ras_in, cutlineDSName = mask, cropToCutline =True)  
     return ras_out
+
+
+    ############################
+    #### Datacube_ Extract  ####
+    ############################
+
+def dc_describe(cfg: DictConfig)-> bool:
+    '''
+    Configurate the call of d.describe() with hydra parameters.
+    '''
+    instantiate(OmegaConf.create(cfg.parameters['dc_describeCollections']))
+    return True
+
+def dc_serach(cfg: DictConfig)-> str :
+    '''
+    Configurate the call of d.search()  with hydra parameters.
+    return the output path of the search result.
+    '''
+    out = instantiate(OmegaConf.create(cfg.parameters['dc_search']))
+    return out
+
+def dc_extraction(cfg: DictConfig)-> str:
+    '''
+    Configurate the call of extract_cog() with hydra parameters.
+    return the output path of the extracted file.
+    '''
+    out = instantiate(OmegaConf.create(cfg.parameters['dc_extrac_cog']))
+    return out
+
+
 
 # Helpers
 def setWBTWorkingDir(workingDir):
