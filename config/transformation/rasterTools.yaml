@@ -13,3 +13,5 @@ clip_raster_to_polygon:
 
 # # Add a shpe file path to use as a mask for the raster extraction.
 # mask: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp' # str. Optional defaults to None.
+# # Add a shpe file path to use as a mask for the raster extraction.
+# mask: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp' # str. Optional defaults to None.

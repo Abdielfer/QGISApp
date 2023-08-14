@@ -28,8 +28,9 @@ def main(cfg: DictConfig):
     # print(f"The bbox is: {bbox}")
     # U.dc_describe(cfg)
     # U.dc_serach(cfg)
-    U.dc_extraction(cfg)
-    # print(ex)
+    # U.dc_extraction(cfg)
+    # logging.info(f"Extraction output path: {ex}")
+    # instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
     # chIn   # To check in the wbtools license
     
     ### Take file from the dc_output folder and create a new folder to write the trasformations ###
