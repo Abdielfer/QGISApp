@@ -13,6 +13,10 @@
 *.png
 *.jpg
 *.gpkg
+*.map
+*.json
+*.xml
+
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -31,6 +35,7 @@ venvFlood/
 outputs/
 AutomationOutput/
 dc_output/
+data/
 
 # Submodule
 dc_extract/
