@@ -53,7 +53,7 @@ def getLocalPath():
 def makePath(str1,str2):
     return os.path.join(str1,str2)
 
-def ensureDirectory(pathToCheck):
+def ensureDirectory(pathToCheck:os.path)->os.path:
     if not os.path.isdir(pathToCheck): 
         os.mkdir(pathToCheck)
         print(f"Confirmed directory at: {pathToCheck} ")
@@ -93,41 +93,48 @@ def createTransitFolder(parent_dir_path, folderName:str = 'TransitDir'):
     ensureDirectory(path)
     return path
 
-def clearTransitFolderContent(path, filetype = '/*'):
+def clearTransitFolderContent(path:str, filetype = '/*'):
     '''
     NOTE: This well clear dir without removing the parent dir itself. 
     We can replace '*' for an specific condition ei. '.tif' for specific fileType deletion if needed. 
     @Arguments:
     @path: Parent directory path
-    @filetype: file type toi delete. @default ='/*' delete all files. 
+    @filetype: file type to delete. @default ='/*' delete all files. 
     '''
     files = glob.glob(path + filetype)
     for f in files:
         os.remove(f)
     return True
 
-def listFreeFilesInDirByExt(cwd, ext = '.tif'):
+def listFreeFilesInDirByExt(cwd:str, ext = '.tif'):
     '''
-    @ext = *.csv by default.
+    @ext = *.tif by default.
     NOTE:  THIS function list only files that are directly into <cwd> path. 
     '''
+    cwd = os.path.abspath(cwd)
+    print(f"Current working directory: {cwd}")
     file_list = []
     for (root, dirs, file) in os.walk(cwd):
         for f in file:
+            print(f"File: {f}")
             _,_,extent = get_parenPath_name_ext(f)
             if extent == ext:
                 file_list.append(f)
     return file_list
 
-def listFreeFilesInDirByExt_fullPath(cwd, ext = '.csv'):
+def listFreeFilesInDirByExt_fullPath(cwd:str, ext = '.csv') -> list:
     '''
     @ext = *.csv by default.
     NOTE:  THIS function list only files that are directly into <cwd> path. 
     '''
+    cwd = os.path.abspath(cwd)
+    # print(f"Current working directory: {cwd}")
     file_list = []
     for (root,_, file) in os.walk(cwd, followlinks=True):
         for f in file:
+            # print(f"Current f: {f}")
             _,extent = splitFilenameAndExtention(f)
+            # print(f"Current extent: {extent}")
             if ext == extent:
                 file_list.append(os.path.join(root,f))
     return file_list
@@ -204,14 +211,13 @@ def splitFilenameAndExtention(file_path):
     name = fpath.stem
     return name, extention 
 
-def replaceExtention(inPath,NewExt):
+def replaceExtention(inPath,newExt: str)->os.path :
     '''
     Just remember to add the poin to the new ext -> '.map'
     '''
     dir,fileName = ntpath.split(inPath)
     _,actualExt = ntpath.splitext(fileName)
-    newName= os.path.join(dir,ntpath.basename(inPath).replace(actualExt,NewExt))
-    return newName
+    return os.path.join(dir,ntpath.basename(inPath).replace(actualExt,newExt))
 
 def get_parenPath_name_ext(filePath):
     '''
@@ -225,7 +231,7 @@ def get_parenPath_name_ext(filePath):
     name, ext = splitFilenameAndExtention(filePath)
     return parentPath, name, ext
   
-def addSubstringToName(path, subStr: str, destinyPath = None):
+def addSubstringToName(path, subStr: str, destinyPath = None) -> os.path:
     '''
     @path: Path to the raster to read. 
     @subStr:  String o add at the end of the origial name
@@ -233,11 +239,19 @@ def addSubstringToName(path, subStr: str, destinyPath = None):
     '''
     parentPath,name,ext= get_parenPath_name_ext(path)
     if destinyPath != None: 
-        newPath = os.path.join(destinyPath,(name+subStr+ext))
+        return os.path.join(destinyPath,(name+subStr+ext))
     else: 
-        newPath = os.path.join(parentPath,(name+subStr+ ext))
-    return newPath
+        return os.path.join(parentPath,(name+subStr+ ext))
 
+def replaceName_KeepPathAndExt(path, newName: str) -> os.path:
+    '''
+    @path: Path to the raster to read. 
+    @subStr:  String o add at the end of the origial name
+    @destinyPath (default = None)
+    '''
+    parentPath,_,ext= get_parenPath_name_ext(path)
+    return os.path.join(parentPath,(newName+ext))
+    
 def createCSVFromList(pathToSave: os.path, listData:list):
     '''
     Ths function create a *.csv file with one line per <lstData> element. 
@@ -365,7 +379,7 @@ def computeRaterStats(rasterPath:os.path):
 ####   PCRaster   ####
 ######################
 
-def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,saveSubCath:bool = False): 
+def computeHAND(DEMPath,HANDPath,saveDDL:bool=False,saveStrahOrder:bool=False,saveSubCath:bool = False) -> os.path:
     '''
     1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
     2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
@@ -378,7 +392,7 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     print(DEMMap)
     DEM = pcr.readmap(DEMMap)
     ## Flow Direcction (Use to take long...)
-    print("#####......Computing DInf flow dir.......######")
+    print("#####......Computing D8 flow dir.......######")
     threshold = 8
     FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
     if saveDDL: 
@@ -403,6 +417,215 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     aguila(HAND)
     aguila(subCatchments)
     aguila(areaMin)
+    handTifOut = replaceExtention(HANDPath,'.tif')
+    translateRaster(HANDPath,handTifOut)
+    return handTifOut
+
+######################
+####   GDAL Tools  ###
+######################
+
+class RasterGDAL():
+    '''
+    Some info about GDAL deo Transform
+    adfGeoTransform[0] /* top left x */
+    adfGeoTransform[1] /* w-e pixel resolution */
+    adfGeoTransform[2] /* rotation, 0 if image is "north up" */
+    adfGeoTransform[3] /* top left y */
+    adfGeoTransform[4] /* rotation, 0 if image is "north up" */
+    adfGeoTransform[5] /* n-s pixel resolution */
+    
+    '''
+    def __init__(self, rasterPath) -> None:
+        gdal.AllRegister() # register all of the drivers
+        gdal.DontUseExceptions()
+        self.inputPath = rasterPath
+        self.ds = gdal.Open(rasterPath)
+        if self.ds is None:
+            print('Could not open image')
+            sys.exit(1)   
+        # get image size
+        self.rows = self.ds.RasterYSize
+        self.cols = self.ds.RasterXSize
+        self.NumOfBands = self.ds.RasterCount
+        # get georeference info
+        transform = self.ds.GetGeoTransform()
+        self.xOrigin = transform[0]
+        self.yOrigin = transform[3]
+        self.pixelWidth = transform[1]
+        self.pixelHeight = transform[5]
+        self.projection = self.ds.GetProjection()
+        self.MetaData = self.ds.GetMetadata()
+        self.band1 = self.ds.GetRasterBand(1)
+        self.NoData = self.band1.GetNoDataValue()
+
+    def setDirGDAL(self, path ):
+        os.chdir()
+    
+    def getRasterDataset(self):
+        return self.ds 
+   
+    def getRasterNpArray(self, maskNoData:bool = True)-> np.array:
+        arr = self.ds.ReadAsArray()
+        if maskNoData:
+            arr = np.ma.masked_equal(arr, self.NoData)
+        return arr
+    
+    def computePixelOffset(self,x,y):
+        # compute pixel offset
+        xOffset = int((x - self.xOrigin) / self.pixelWidth)
+        yOffset = int((y - self.yOrigin) / self.pixelHeight)
+        return xOffset, yOffset
+
+    def closeRaster(self):
+        self.ds = None
+
+    def translateRaster(self, outpPath, format:str = "GeoTiff"):
+        """
+        Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
+        """
+        gdal.Translate(outpPath,self.ds,format=format)
+        return True
+
+    def saveTiffAsPCRaster(self):
+        outpPath = ntpath.basename(self.inputPath).replace('.tif','.map') 
+        gdal.Translate(outpPath,self.ds,format='PCRaster')
+        return outpPath
+
+    def printRaster(self):
+        print("---- Image size ----")
+        print(f"Row : {self.rows}")
+        print(f"Cols : {self.cols}")
+        print(f"xOrigin : {self.xOrigin}")
+        print(f"yOrigin : {self.yOrigin}") 
+        print(f"NumOfBands : {self.NumOfBands}")
+        print(f"pixelWidth : {self.pixelWidth}")
+        print(f"pixelHeight : {self.pixelHeight}")
+        print(f"projection : {self.projection}")
+        print(f"MetaData : {self.MetaData}")
+
+###  GDAL independent functions
+def translateRaster(inPath, outpPath, format:str = "GeoTiff") -> bool:
+        """
+        Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
+        """
+        gdal.Translate(outpPath,inPath,format=format)
+        return True
+
+def saveTiffAsPCRaster(inputPath) -> str:
+        outpPath = replaceExtention(inputPath,'.map')
+        gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32)
+        return outpPath
+
+def readRasterAsArry(rasterPath):
+   return gdal_array.LoadFile(rasterPath)
+
+def reproject_tif(tif_file, output_crs) -> str:
+    """
+    Reprojects a TIFF file to the specified coordinate reference system (CRS).
+
+    Args:
+        tif_file (str): Path to the input TIFF file.
+        output_crs (str): Output coordinate reference system (CRS) in the format 'EPSG:<code>'.
+
+    Returns:
+        str: Path to the reprojected TIFF file.
+    """
+    # Open the input TIFF file
+    dataset = gdal.Open(tif_file)
+    # Get the input CRS
+    input_crs = dataset.GetProjection()
+    # Create a spatial reference object for the input CRS
+    input_srs = osr.SpatialReference()
+    input_srs.ImportFromWkt(input_crs)
+    # Create a spatial reference object for the output CRS
+    output_srs = osr.SpatialReference()
+    output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
+    output_file = os.path.splitext(tif_file)[0] + '_reproj.tif'
+    # Create the output dataset
+    gdal.Warp(output_file, dataset, dstSRS=output_srs, srcSRS=input_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999)
+    # Close the datasets
+    del dataset
+    return output_file
+
+def crop_tif(tif_file, shapefile, output_file)-> str:
+    """
+    Crops a TIFF file using a shapefile as a mask.
+    Args:
+        tif_file (str): Path to the input TIFF file.
+        shapefile (str): Path to the input shapefile.
+        output_file (str): Path to the output TIFF file.
+    Returns:
+        str: Path to the output TIFF file.
+    """
+    print(f'Into crop_tif, tif_file: {tif_file}')
+    # Open the input TIFF file
+    dataset = gdal.Open(tif_file)
+    cols = dataset.RasterXSize
+    rows = dataset.RasterYSize
+    count = dataset.RasterCount
+    datatype = gdal.GetDataTypeName(dataset.GetRasterBand(1).DataType)
+    print(f'cols,rows: {cols}:--{rows}')
+    print(f'datatype: {datatype}')
+    # Open the shapefile
+    shapefile_ds = ogr.Open(shapefile)
+    layer = shapefile_ds.GetLayer()
+    # Get the extent of the shapefile
+    extent = layer.GetExtent()
+    print(f'extent: {extent}')
+    # Set the output file format
+    driver = gdal.GetDriverByName('GTiff')
+    # Create the output dataset
+    output_dataset = driver.Create(output_file, cols,rows,count, gdal.GDT_Float32)
+    # Set the geotransform and projection
+    output_dataset.SetGeoTransform(dataset.GetGeoTransform())
+    output_dataset.SetProjection(dataset.GetProjection())
+    # Perform the cropping
+    print(f'output_dataset: {output_dataset}')
+    gdal.Warp(output_dataset, dataset, outputBounds=extent, cutlineDSName=shapefile, cropToCutline=True, dstNodata=-9999)
+    # Close the datasets
+    dataset = None
+    output_dataset = None
+    shapefile_ds = None
+    return output_file
+
+def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
+        driver = ogr.GetDriverByName('ESRI Shapefile')
+        data_source = driver.Open(file_path, 0)
+        layer = data_source.GetLayer()
+
+        extent = layer.GetExtent()
+        min_x, max_x, min_y, max_y = extent
+
+        return min_x, min_y, max_x, max_y
+
+############################
+#### Datacube_ Extract  ####
+############################
+
+def dc_describe(cfg: DictConfig)-> bool:
+    '''
+    Configurate the call of d.describe() with hydra parameters.
+    '''
+    instantiate(OmegaConf.create(cfg.parameters['dc_describeCollections']))
+    return True
+
+def dc_serach(cfg: DictConfig)-> str :
+    '''
+    Configurate the call of d.search()  with hydra parameters.
+    return the output path of the search result.
+    '''
+    out = instantiate(OmegaConf.create(cfg.parameters['dc_search']))
+    return out
+
+def dc_extraction(cfg: DictConfig)-> str:
+    '''
+    Configurate the call of extract_cog() with hydra parameters.
+    return the output path of the extracted file.
+    '''
+    out = instantiate(OmegaConf.create(cfg.parameters['dc_extrac_cog']))
+    return out
+
     
 
 #########################
@@ -772,241 +995,15 @@ class generalRasterTools():
         return str(self.workingDir)
 
 #WbW. TO SLOW: To be checked.  
-def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = False ):
-        wbt.clip_raster_to_polygon(
-            inputRaster, 
-            maskVector, 
-            outPath, 
-            maintainDim, 
-            callback=default_callback
-            )
-
-######################
-####   GDAL Tools  ###
-######################
-
-class RasterGDAL():
-    '''
-    Some info about GDAL deo Transform
-    adfGeoTransform[0] /* top left x */
-    adfGeoTransform[1] /* w-e pixel resolution */
-    adfGeoTransform[2] /* rotation, 0 if image is "north up" */
-    adfGeoTransform[3] /* top left y */
-    adfGeoTransform[4] /* rotation, 0 if image is "north up" */
-    adfGeoTransform[5] /* n-s pixel resolution */
-    
-    '''
-    def __init__(self, rasterPath) -> None:
-        gdal.AllRegister() # register all of the drivers
-        gdal.DontUseExceptions()
-        self.inputPath = rasterPath
-        self.ds = gdal.Open(rasterPath)
-        if self.ds is None:
-            print('Could not open image')
-            sys.exit(1)   
-        # get image size
-        self.rows = self.ds.RasterYSize
-        self.cols = self.ds.RasterXSize
-        self.NumOfBands = self.ds.RasterCount
-        # get georeference info
-        transform = self.ds.GetGeoTransform()
-        self.xOrigin = transform[0]
-        self.yOrigin = transform[3]
-        self.pixelWidth = transform[1]
-        self.pixelHeight = transform[5]
-        self.projection = self.ds.GetProjection()
-        self.MetaData = self.ds.GetMetadata()
-        self.band1 = self.ds.GetRasterBand(1)
-        self.NoData = self.band1.GetNoDataValue()
-
-    def setDirGDAL(self, path ):
-        os.chdir()
-    
-    def getRasterDataset(self):
-        return self.ds 
-   
-    def getRasterNpArray(self, maskNoData:bool = True)-> np.array:
-        arr = self.ds.ReadAsArray()
-        if maskNoData:
-            arr = np.ma.masked_equal(arr, self.NoData)
-        return arr
-    
-    def computePixelOffset(self,x,y):
-        # compute pixel offset
-        xOffset = int((x - self.xOrigin) / self.pixelWidth)
-        yOffset = int((y - self.yOrigin) / self.pixelHeight)
-        return xOffset, yOffset
-
-    def closeRaster(self):
-        self.ds = None
-
-    def translateRaster(self, outpPath, format:str = "GeoTiff"):
-        """
-        Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
-        """
-        gdal.Translate(outpPath,self.ds,format=format)
-        return True
-
-    def saveTiffAsPCRaster(self):
-        outpPath = ntpath.basename(self.inputPath).replace('.tif','.map') 
-        gdal.Translate(outpPath,self.ds,format='PCRaster')
-        return outpPath
-
-    def printRaster(self):
-        print("---- Image size ----")
-        print(f"Row : {self.rows}")
-        print(f"Cols : {self.cols}")
-        print(f"xOrigin : {self.xOrigin}")
-        print(f"yOrigin : {self.yOrigin}") 
-        print(f"NumOfBands : {self.NumOfBands}")
-        print(f"pixelWidth : {self.pixelWidth}")
-        print(f"pixelHeight : {self.pixelHeight}")
-        print(f"projection : {self.projection}")
-        print(f"MetaData : {self.MetaData}")
-
-###  GDAL independent functions
-def translateRaster(inPath, outpPath, format:str = "GeoTiff"):
-        """
-        Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
-        """
-        gdal.Translate(outpPath,inPath,format=format)
-        return True
-
-def saveTiffAsPCRaster(inputPath):
-        outpPath = replaceExtention(inputPath,'.map')
-        gdal.Translate(outpPath,inputPath,format='PCRaster')
-        return outpPath
-
-def readRasterAsArry(rasterPath):
-   return gdal_array.LoadFile(rasterPath)
-
-def reprojectRaster(outMap,inMap, kwargs):
-    '''
-    kwargs example: kwargs = {'format': 'GTiff', 'geoloc': True}
-    '''
-    ds = gdal.Warp(outMap, inMap, **kwargs)
-    del ds
-    return outMap
-
-def reproject_tif(tif_file, output_crs):
-    """
-    Reprojects a TIFF file to the specified coordinate reference system (CRS).
-
-    Args:
-        tif_file (str): Path to the input TIFF file.
-        output_crs (str): Output coordinate reference system (CRS) in the format 'EPSG:<code>'.
-
-    Returns:
-        str: Path to the reprojected TIFF file.
-    """
-    # Open the input TIFF file
-    dataset = gdal.Open(tif_file)
-    # Get the input CRS
-    input_crs = dataset.GetProjection()
-    # Create a spatial reference object for the input CRS
-    input_srs = osr.SpatialReference()
-    input_srs.ImportFromWkt(input_crs)
-    # Create a spatial reference object for the output CRS
-    output_srs = osr.SpatialReference()
-    output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
-    # Create a transformation object to convert from input CRS to output CRS
-    transform = osr.CoordinateTransformation(input_srs, output_srs)
-    # Get the output file path
-    output_file = os.path.splitext(tif_file)[0] + '_reproj.tif'
-    # Create the output dataset
-    gdal.Warp(output_file, dataset, dstSRS=output_srs, srcSRS=input_srs, resampleAlg=gdal.GRA_Bilinear)
-    # Close the datasets
-    dataset = None
-    return output_file
-
-def crop_tif(tif_file, shapefile, output_file)-> str:
-    """
-    Crops a TIFF file using a shapefile as a mask.
-    Args:
-        tif_file (str): Path to the input TIFF file.
-        shapefile (str): Path to the input shapefile.
-        output_file (str): Path to the output TIFF file.
-    Returns:
-        str: Path to the output TIFF file.
-    """
-    # Open the input TIFF file
-    dataset, _ = readRaster(tif_file)
-    count,cols,rows = dataset.shape
-    print(f'cols,rows: {cols}:--{rows}')
-    # Open the shapefile
-    shapefile_ds = ogr.Open(shapefile)
-    layer = shapefile_ds.GetLayer()
-    # Get the extent of the shapefile
-    extent = layer.GetExtent()
-    # Set the output file format
-    driver = gdal.GetDriverByName('GTiff')
-    # Create the output dataset
-    output_dataset = driver.Create(output_file, cols,rows,count,dataset.GetRasterBand(1).DataType)
-    # Set the geotransform and projection
-    output_dataset.SetGeoTransform(dataset.GetGeoTransform())
-    output_dataset.SetProjection(dataset.GetProjection())
-    # Set the output dataset extent to the shapefile extent
-    output_dataset.SetExtent(*extent)
-    # Perform the cropping
-    gdal.Warp(output_dataset, dataset, cutlineDSName=shapefile, cropToCutline=True)
-    # Close the datasets
-    dataset = None
-    output_dataset = None
-    shapefile_ds = None
-    return output_file
-
-def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
-        driver = ogr.GetDriverByName('ESRI Shapefile')
-        data_source = driver.Open(file_path, 0)
-        layer = data_source.GetLayer()
-
-        extent = layer.GetExtent()
-        min_x, max_x, min_y, max_y = extent
-
-        return min_x, min_y, max_x, max_y
-
-## Clip raster With GDAL: Tested OK
-def clipRasterGdal(ras_in,mask,ras_out):
-    """
-    TESTED: OK
-    ras_in='C:/Users/schol/montreal_500m.tif'
-    mask -> shp_in="C:/Users/schol/mypo.shp"
-    ras_out='C:/Users/schol/montreal_clip.tif
-    
-    NOTE: If not output CRS is specified, the output takes the input CRS. 
-    """
-    gdal.Warp(ras_out,ras_in, cutlineDSName = mask, cropToCutline =True)  
-    return ras_out
-
-
-    ############################
-    #### Datacube_ Extract  ####
-    ############################
-
-def dc_describe(cfg: DictConfig)-> bool:
-    '''
-    Configurate the call of d.describe() with hydra parameters.
-    '''
-    instantiate(OmegaConf.create(cfg.parameters['dc_describeCollections']))
-    return True
-
-def dc_serach(cfg: DictConfig)-> str :
-    '''
-    Configurate the call of d.search()  with hydra parameters.
-    return the output path of the search result.
-    '''
-    out = instantiate(OmegaConf.create(cfg.parameters['dc_search']))
-    return out
-
-def dc_extraction(cfg: DictConfig)-> str:
-    '''
-    Configurate the call of extract_cog() with hydra parameters.
-    return the output path of the extracted file.
-    '''
-    out = instantiate(OmegaConf.create(cfg.parameters['dc_extrac_cog']))
-    return out
-
-
+def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = False )->os.path:
+    wbt.clip_raster_to_polygon(
+        inputRaster, 
+        maskVector, 
+        outPath, 
+        maintainDim, 
+        callback=default_callback
+        )
+    return outPath
 
 # Helpers
 def setWBTWorkingDir(workingDir):

@@ -15,8 +15,8 @@ dc_extrac_cog:
 #  resolution: 16 # int
  method: 'bilinear' #str 
 #  out_crs: 'EPSG:4326' #str
- out_dir: C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel\'
- suffix: BC_Quesnel # str
+ out_dir: C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\
+# suffix: None # str
 # datetime_filter: None # str
 # resolution_filter: None # str
 # overviews: False 
@@ -40,7 +40,7 @@ dc_describeCollections:
 #  urls: ['https://datacube.services.geo.ca/api'] 
 #  geojson : False 
 #________________________________________________________________
-# Values that can be shar ed by all functions:
+# Values that can be shared by all functions:
 date_time : None  # datetime_str_in_ISO_8601_with_Z. (ex. str --> '2011-08-12T20:17:46.384Z') Optional defaults to None. 
 
  

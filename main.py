@@ -23,21 +23,38 @@ def logger(cfg: DictConfig, nameByTime):
 def main(cfg: DictConfig):
     nameByTime = U.makeNameByTime()
     logger(cfg,nameByTime)
-    shpFile = cfg.transformation['mask']
-    bbox = U.get_Shpfile_bbox(shpFile)
-    print(f"The bbox is: {bbox}")
+    # shpFile = cfg.transformation['mask']
+    # bbox = U.get_Shpfile_bbox(shpFile)
+    # print(f"The bbox is: {bbox}")
     # U.dc_describe(cfg)
     # U.dc_serach(cfg)
-    # ex = U.dc_extraction(cfg)
-    # logging.info(f"Extraction output path: {ex}")
-    # instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
+    U.dc_extraction(cfg)
+    # print(ex)
     # chIn   # To check in the wbtools license
+    
+    ### Take file from the dc_output folder and create a new folder to write the trasformations ###
+    tifFile = U.listFreeFilesInDirByExt_fullPath('C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/dc_output', ext='.tif')
+    print(f"The tif file is: {tifFile}")    
+    config = OmegaConf.create(cfg.transformation['clip_raster_to_polygon'])
+    config['inputRaster'] = U.reproject_tif(tifFile[0],'EPSG:4326')
+    shpPathFormCropTif = config['maskVector']
+    _,name,_=U.get_parenPath_name_ext(shpPathFormCropTif)
+    paret = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data'
+    newDir = U.ensureDirectory(os.path.join(paret,name))
+    config['outPath'] = str(os.path.join(newDir,str(name+'_crop.tif')))  
+    print(f"The config is: {config}")
+    
+    # # Crop the tif
+    cropTif = instantiate(config)
+    print(f"Croped Tif path: {cropTif}")
+    # Compute HAND
 
-    # cliped = instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
-    # cliped = U.clipRasterGdal(ras_in,mask,ras_out)
-    # U.reproject_tif(cliped,'EPSG:4326')
-    cropTif = instantiate(OmegaConf.create(cfg.transformation['crop_tif']))
-    U.reproject_tif(cropTif,'EPSG:4326')
+    handOutputPath = U.addSubstringToName(cropTif,'_HAND')
+    handOutputPath = U.replaceExtention(handOutputPath,'.map')
+    U.computeHAND(cropTif,handOutputPath)
+
+    # Clean dc_output folder
+    # U.clearTransitFolderContent('C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/dc_output')
 
 if __name__ == "__main__":
     with U.timeit():
