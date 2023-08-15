@@ -650,17 +650,13 @@ class dtmTransformer():
     Functions are mostly based on WhiteBoxTools libraries. For optimal functionality DTM’s most be high resolution, 
     ideally Lidar 1 m or < 2m. 
     '''
-    def __init__(self, workingDir):
-        self.mainFileName = " "
-        if os.path.isdir(workingDir): # Creates output dir if it does not already exist 
+    def __init__(self, workingDir:os.path = None) -> os.path:
+        if not os.path.isdir(workingDir): # Creates output dir if it does not already exist 
             self.workingDir = workingDir
             wbt.set_working_dir(workingDir)
-        else:
-            self.workingDir = input('Enter working directory')
-            ensureDirectory(self.workingDir)
-            wbt.set_working_dir(self.workingDir)
+        print(f"Working dir at: {self.workingDir}")    
+        return self.workingDir
         
-    
     def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = True):
         '''
         Ref:   https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#filldepressions
