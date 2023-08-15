@@ -1,6 +1,6 @@
 
 defaults:
-  - parameters : dc_Extract_params  #Define which config to call. 
+  - dc_Extract_params : dc_extractParamsCanvas  #Define which config to call. 
   - transformation : rasterTools # Define which raster transformations tools to call
   - _self_
 

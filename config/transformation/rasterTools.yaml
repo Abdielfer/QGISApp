@@ -1,9 +1,9 @@
 ## 
 crop_tif:
  _target_ : util.crop_tif 
-#  tif_file : None
- shapefile : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp
-#  output_file : None
+#  inputRaster : None
+ maskVector : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp
+#  outPath : None
 
 clip_raster_to_polygon:
  _target_ : util.clip_raster_to_polygon

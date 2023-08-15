@@ -57,7 +57,7 @@ def ensureDirectory(pathToCheck:os.path)->os.path:
     if not os.path.isdir(pathToCheck): 
         os.mkdir(pathToCheck)
         print(f"Confirmed directory at: {pathToCheck} ")
-        return pathToCheck
+    return pathToCheck
 
 def relocateFile(inputFilePath, outputFilePath):
     '''
@@ -379,8 +379,10 @@ def computeRaterStats(rasterPath:os.path):
 ####   PCRaster   ####
 ######################
 
-def computeHAND(DEMPath,HANDPath,saveDDL:bool=False,saveStrahOrder:bool=False,saveSubCath:bool = False) -> os.path:
+def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,saveSubCath:bool = False) -> os.path:
     '''
+    NOTE: Important to ensure the input DEM has a well defined NoData Value ex. -9999. 
+
     1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
     2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
     3- Read DEM in PCRasterformat
@@ -514,7 +516,7 @@ def translateRaster(inPath, outpPath, format:str = "GeoTiff") -> bool:
 
 def saveTiffAsPCRaster(inputPath) -> str:
         outpPath = replaceExtention(inputPath,'.map')
-        gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32)
+        gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32, noData= -9999)
         return outpPath
 
 def readRasterAsArry(rasterPath):
@@ -548,19 +550,21 @@ def reproject_tif(tif_file, output_crs) -> str:
     del dataset
     return output_file
 
-def crop_tif(tif_file, shapefile, output_file)-> str:
+def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     """
     Crops a TIFF file using a shapefile as a mask.
+    NOTE: It is important to FILL THE NEW DATASET WITH np.nan to avoid ending with big extentions of valid values, instead of NoData. 
+
     Args:
-        tif_file (str): Path to the input TIFF file.
-        shapefile (str): Path to the input shapefile.
-        output_file (str): Path to the output TIFF file.
+        inputRaster (str): Path to the input TIFF file.
+        maskVector (str): Path to the input shapefile.
+        outPath (str): Path to the output TIFF file.
     Returns:
         str: Path to the output TIFF file.
     """
-    print(f'Into crop_tif, tif_file: {tif_file}')
+    print(f'Into crop_tif, tif_file: {inputRaster}')
     # Open the input TIFF file
-    dataset = gdal.Open(tif_file)
+    dataset = gdal.Open(inputRaster)
     cols = dataset.RasterXSize
     rows = dataset.RasterYSize
     count = dataset.RasterCount
@@ -568,7 +572,7 @@ def crop_tif(tif_file, shapefile, output_file)-> str:
     print(f'cols,rows: {cols}:--{rows}')
     print(f'datatype: {datatype}')
     # Open the shapefile
-    shapefile_ds = ogr.Open(shapefile)
+    shapefile_ds = ogr.Open(maskVector)
     layer = shapefile_ds.GetLayer()
     # Get the extent of the shapefile
     extent = layer.GetExtent()
@@ -576,18 +580,18 @@ def crop_tif(tif_file, shapefile, output_file)-> str:
     # Set the output file format
     driver = gdal.GetDriverByName('GTiff')
     # Create the output dataset
-    output_dataset = driver.Create(output_file, cols,rows,count, gdal.GDT_Float32)
+    output_dataset = driver.Create(outPath, cols,rows,count, gdal.GDT_Float32)
+    output_dataset.GetRasterBand(1).Fill(np.nan)  # Importatn step to ensure DO NOT FILL the whole extention with valid values. 
     # Set the geotransform and projection
     output_dataset.SetGeoTransform(dataset.GetGeoTransform())
     output_dataset.SetProjection(dataset.GetProjection())
     # Perform the cropping
     print(f'output_dataset: {output_dataset}')
-    gdal.Warp(output_dataset, dataset, outputBounds=extent, cutlineDSName=shapefile, cropToCutline=True, dstNodata=-9999)
+    gdal.Warp(output_dataset, dataset, outputBounds=extent, cutlineDSName=maskVector, cropToCutline=True)
+    # ,cutlineLayer = 'bc_quesnel'
     # Close the datasets
-    dataset = None
-    output_dataset = None
-    shapefile_ds = None
-    return output_file
+    dataset = output_dataset= shapefile_ds = None
+    return outPath
 
 def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
         driver = ogr.GetDriverByName('ESRI Shapefile')
@@ -607,7 +611,7 @@ def dc_describe(cfg: DictConfig)-> bool:
     '''
     Configurate the call of d.describe() with hydra parameters.
     '''
-    instantiate(OmegaConf.create(cfg.parameters['dc_describeCollections']))
+    instantiate(OmegaConf.create(cfg.dc_Extract_params['dc_describeCollections']))
     return True
 
 def dc_serach(cfg: DictConfig)-> str :
@@ -615,7 +619,7 @@ def dc_serach(cfg: DictConfig)-> str :
     Configurate the call of d.search()  with hydra parameters.
     return the output path of the search result.
     '''
-    out = instantiate(OmegaConf.create(cfg.parameters['dc_search']))
+    out = instantiate(OmegaConf.create(cfg.dc_Extract_params['dc_search']))
     return out
 
 def dc_extraction(cfg: DictConfig)-> str:
@@ -623,7 +627,7 @@ def dc_extraction(cfg: DictConfig)-> str:
     Configurate the call of extract_cog() with hydra parameters.
     return the output path of the extracted file.
     '''
-    out = instantiate(OmegaConf.create(cfg.parameters['dc_extrac_cog']))
+    out = instantiate(OmegaConf.create(cfg.dc_Extract_params['dc_extrac_cog']))
     return out
 
     

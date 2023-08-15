@@ -6,8 +6,8 @@
 dc_extrac_cog:
  _target_: dc_extract.extract_cog.extract_cog.extract_cog
  collections : 'cdem:dem'
- bbox_crs: 'EPSG:4326'
- bbox: '-122.525,52.1357,-120.14,53.115' 
+ bbox_crs: 'EPSG:4326' 
+ bbox: '-123.34,52.06,-121.40,53.0' 
 # dc_extract_cog's list of params:
 #  field_value : 1 # str, int, float
 #  field_id : 'Id' #str
@@ -28,7 +28,7 @@ dc_extrac_cog:
 dc_search:
  _target_: dc_extract.describe.describe.search
  name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example\search.gpkg'
- bbox: '-123.3250,51.9500,-120.1473,53.7507'
+ bbox: '-122.525,52.1357,-120.14,53.115'
 #  urls: ['https://datacube.services.geo.ca/api']         
 #  dt: None
  cols: 'cdem'
