@@ -8,6 +8,11 @@
 *.tiff
 *.tif
 *.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qmd
 *.pkl
 *.txt
 *.png
