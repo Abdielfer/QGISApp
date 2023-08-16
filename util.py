@@ -423,6 +423,7 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     translateRaster(HANDPath,handTifOut)
     return handTifOut
 
+
 ######################
 ####   GDAL Tools  ###
 ######################
@@ -507,8 +508,14 @@ class RasterGDAL():
         print(f"MetaData : {self.MetaData}")
 
 ###  GDAL independent functions
+def clipRasterSimpleLine(DEMPath:os.path, vectorMask, output)-> os.path:
+    ext = get_Shpfile_bbox(vectorMask)
+    gdal.Warp(output, DEMPath,outputBounds=ext,cutlineDSName=vectorMask, cropToCutline=True)
+    return output
+
 def translateRaster(inPath, outpPath, format:str = "GeoTiff") -> bool:
         """
+        GDAL function to go translate rasters between different suported format. See ref. 
         Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
         """
         gdal.Translate(outpPath,inPath,format=format)
@@ -516,7 +523,7 @@ def translateRaster(inPath, outpPath, format:str = "GeoTiff") -> bool:
 
 def saveTiffAsPCRaster(inputPath) -> str:
         outpPath = replaceExtention(inputPath,'.map')
-        gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32, noData= -9999)
+        gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32, noData= np.NaN)
         return outpPath
 
 def readRasterAsArry(rasterPath):
@@ -581,7 +588,7 @@ def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     driver = gdal.GetDriverByName('GTiff')
     # Create the output dataset
     output_dataset = driver.Create(outPath, cols,rows,count, gdal.GDT_Float32)
-    output_dataset.GetRasterBand(1).Fill(np.nan)  # Importatn step to ensure DO NOT FILL the whole extention with valid values. 
+    output_dataset.GetRasterBand(1).Fill(-99999)  # Important step to ensure DO NOT FILL the whole extention with valid values. 
     # Set the geotransform and projection
     output_dataset.SetGeoTransform(dataset.GetGeoTransform())
     output_dataset.SetProjection(dataset.GetProjection())
@@ -631,7 +638,6 @@ def dc_extraction(cfg: DictConfig)-> str:
     return out
 
     
-
 #########################
 ####   WhiteBoxTools  ###
 #########################

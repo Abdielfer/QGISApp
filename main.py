@@ -28,39 +28,53 @@ def main(cfg: DictConfig):
     # print(f"The bbox is: {bbox}")
     # U.dc_describe(cfg)
     # U.dc_serach(cfg)
-    U.dc_extraction(cfg)
+    # U.dc_extraction(cfg)
     # logging.info(f"Extraction output path: {ex}")
     # instantiate(OmegaConf.create(cfg.transformation['clipRasterGdal']))
     # chIn   # To check in the wbtools license
     
-    ### Take file.tif from the dc_output folder and create a new folder to write the trasformations ###
-    tifFile = U.listFreeFilesInDirByExt_fullPath('C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/dc_output', ext='.tif')
-    print(f"The tif file is: {tifFile[0]}")    
-        ## Create configClipper dictionary  (Only change the fucntion name for a change)
-    configClipper = OmegaConf.create(cfg.transformation['crop_tif'])
-    configClipper['inputRaster'] = tifFile[0]
-        ## Create file with mask name.
-    shpPathFormCropTif = configClipper['maskVector']
-    _,name,_=U.get_parenPath_name_ext(shpPathFormCropTif)
-    paret = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data'
-    newDir = U.ensureDirectory(os.path.join(paret,name))
-        ## Update output Path in configClipper
-    configClipper['outPath'] = os.path.join(newDir,str(name+'_crop.tif'))  
-    print(f"The config for Clip is: {configClipper}")
-            # Crop the tif
-    cropTif = instantiate(configClipper)
-    print(f"Croped Tif path: {cropTif}")
-        ## Reproject the clipped file. 
-    cropTifRproj = U.reproject_tif(cropTif,'EPSG:4326')
-        ## Create HAND output path
-    # handOutputPath = U.addSubstringToName(cropTifRproj,'_HAND')
-    # handOutputPath = U.replaceExtention(handOutputPath,'.map')
-    U.saveTiffAsPCRaster(cropTifRproj)
-    ### Compute HAND
-    # U.computeHAND(cropTifRproj,handOutputPath)
+    DEM = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\cdem-canada-dem-clip-3979.tif'
+    clip = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\BC_QuesnelClip.tif'
+    mask = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp'
+    clipped = U.clipRasterSimpleLine(DEM,mask,clip)
+    print(clipped)
 
-    # Clean dc_output folder
-    U.clearTransitFolderContent('C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/dc_output')
+    ## Create HAND output path
+    handOutputPath = U.addSubstringToName(clipped,'_HAND')
+    handOutputPath = U.replaceExtention(handOutputPath,'.map')
+    ### Compute HAND
+    handMap = U.computeHAND(clipped,handOutputPath)
+    print(handMap)
+
+    # ### Take file.tif from the dc_output folder and create a new folder to write the trasformations ###
+    # tifFile = U.listFreeFilesInDirByExt_fullPath('C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/dc_output', ext='.tif')
+    # print(f"The tif file is: {tifFile[0]}")    
+    #     ## Create configClipper dictionary  (Only change the fucntion name for a change)
+    # configClipper = OmegaConf.create(cfg.transformation['crop_tif'])
+    # configClipper['inputRaster'] = tifFile[0]
+    #     ## Create file with mask name.
+    # shpPathFormCropTif = configClipper['maskVector']
+    
+    # _,name,_=U.get_parenPath_name_ext(shpPathFormCropTif)
+    # paret = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data'
+    # newDir = U.ensureDirectory(os.path.join(paret,name))
+    #     ## Update output Path in configClipper
+    # configClipper['outPath'] = os.path.join(newDir,str(name+'_crop.tif'))  
+    # print(f"The config for Clip is Ready: {configClipper}")
+    #         # Crop the tif
+    # cropTif = instantiate(configClipper)
+    # print(f"Croped Tif path: {cropTif}")
+    #     ## Reproject the clipped file. 
+    # cropTifRproj = U.reproject_tif(cropTif,'EPSG:4326')
+    #     ## Create HAND output path
+    # # handOutputPath = U.addSubstringToName(cropTifRproj,'_HAND')
+    # # handOutputPath = U.replaceExtention(handOutputPath,'.map')
+    # U.saveTiffAsPCRaster(cropTifRproj)
+    # ### Compute HAND
+    # # U.computeHAND(cropTifRproj,handOutputPath)
+
+    # # Clean dc_output folder
+    # U.clearTransitFolderContent('C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/dc_output')
 
 if __name__ == "__main__":
     with U.timeit():
