@@ -2,7 +2,6 @@ import os, ntpath
 import glob
 import pathlib
 import shutil
-import time
 from time import strftime
 from typing import Tuple
 import pandas as pd
@@ -162,6 +161,11 @@ def listALLFilesInDirByExt_fullPath(cwd, ext = '.csv'):
         fullList.extend(localList) 
     return fullList
 
+def isSubstringInText(subStr,text)->bool:
+    if subStr in text:
+        return True
+    return False
+
 def createListFromCSV(csv_file_location, delim:str =','):  
     '''
     @return: list from a <csv_file_location>.
@@ -254,7 +258,7 @@ def replaceName_KeepPathAndExt(path, newName: str) -> os.path:
     
 def createCSVFromList(pathToSave: os.path, listData:list):
     '''
-    Ths function create a *.csv file with one line per <lstData> element. 
+    This function create a *.csv file with one line per <lstData> element. 
     @pathToSave: path of *.csv file to be writed with name and extention.
     @listData: list to be writed. 
     '''
@@ -269,9 +273,12 @@ def createCSVFromList(pathToSave: os.path, listData:list):
     removeFile(textPath)
     return True
  
-                            ###########            
-                            ### GIS ###
-                            ###########
+
+
+
+###########            
+### GIS ###
+###########
 
 def plotImageAndMask(img, mask,imgName:str='Image', mskName: str= 'Mask'):
     # colList = ['Image','Mask']
@@ -311,6 +318,17 @@ def reshape_as_raster(arr):
     return: arr as image in raster order (bands, rows, columns)
     '''
     return np.transpose(arr, [2, 0, 1])
+
+def updateDict(dic:dict, args:dict)->dict:
+    outDic = dic
+    for k in args.keys():
+        if k in dic.keys():
+            outDic[k]= args[k]
+    return outDic
+
+#######################
+### Rasterio Tools  ###
+#######################
 
 def readRaster(rasterPath:os.path) -> tuple[np.array, dict]:
     '''
@@ -388,29 +406,38 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     3- Read DEM in PCRasterformat
     4- Compute flow direction with d8 algorithm -> lddcreate()
     5- Compute strahler Order-> streamorder(FlowDir)
+    
+    @DEMPath : Input path to the DEM in *.tif format.
+    @HANDPath : Output path for the HAND.map result.
+    
     '''
+    path,communName,_ = get_parenPath_name_ext(DEMPath)
+    lddPath =os.path.join(path,str(communName+'_ldd.map'))
+    strahleOrdPath =os.path.join(path,str(communName+'_StrOrder.map'))
+    subCatch =os.path.join(path,str(communName+'_subCatch.map'))
     DEMMap = saveTiffAsPCRaster(DEMPath)
     pcr.setclone(DEMMap)
     print(DEMMap)
     DEM = pcr.readmap(DEMMap)
+    aguila(DEM)
     ## Flow Direcction (Use to take long...)
     print("#####......Computing D8 flow dir.......######")
     threshold = 8
     FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
     if saveDDL: 
-        pcr.report(FlowDir,'data\ddl.map')
+        pcr.report(FlowDir,lddPath)
     print('#####......Computing Strahler order.......######')
     strahlerOrder = streamorder(FlowDir)
     strahlerRiver = ifthen(strahlerOrder>=threshold,strahlerOrder)
     if saveStrahOrder:
-        pcr.report(strahlerRiver, 'data\strahlerRiver.map')
+        pcr.report(strahlerRiver, strahleOrdPath)
     print('#####......Finding outlets.......######')
     junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
     outlets = ordinal(cover(uniqueid(junctions),0))
     print('#####......Calculating subcatchment.......######')
     subCatchments = catchment(FlowDir,outlets)
     if saveSubCath:
-        pcr.report(subCatchments,'data\subCathments.map')
+        pcr.report(subCatchments,subCatch)
     print('#####......Computing HAND.......######')
     areaMin = areaminimum(DEM,subCatchments)
     HAND = DEM - areaMin
@@ -508,23 +535,24 @@ class RasterGDAL():
         print(f"MetaData : {self.MetaData}")
 
 ###  GDAL independent functions
-def clipRasterSimpleLine(DEMPath:os.path, vectorMask, output)-> os.path:
-    ext = get_Shpfile_bbox(vectorMask)
-    gdal.Warp(output, DEMPath,outputBounds=ext,cutlineDSName=vectorMask, cropToCutline=True)
-    return output
+def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> os.path:
+    mask_bbox = get_Shpfile_bbox(vectorMask)
+    gdal.Warp(outPath, DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
+    print(f"Successfully clipped at : {outPath}")
+    return outPath
 
-def translateRaster(inPath, outpPath, format:str = "GeoTiff") -> bool:
-        """
-        GDAL function to go translate rasters between different suported format. See ref. 
-        Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
-        """
-        gdal.Translate(outpPath,inPath,format=format)
-        return True
+def translateRaster(inPath, outpPath, formatTo:str = "GeoTiff") -> bool:
+    """
+    GDAL function to go translate rasters between different suported format. See ref. 
+    Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
+    """
+    gdal.Translate(outpPath,inPath,outputType=gdal.GDT_Float32,format=formatTo)
+    return True
 
 def saveTiffAsPCRaster(inputPath) -> str:
-        outpPath = replaceExtention(inputPath,'.map')
-        gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32, noData= np.NaN)
-        return outpPath
+    outpPath = replaceExtention(inputPath,'.map')
+    gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32)
+    return outpPath
 
 def readRasterAsArry(rasterPath):
    return gdal_array.LoadFile(rasterPath)
@@ -601,14 +629,22 @@ def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     return outPath
 
 def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
-        driver = ogr.GetDriverByName('ESRI Shapefile')
-        data_source = driver.Open(file_path, 0)
-        layer = data_source.GetLayer()
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    data_source = driver.Open(file_path, 0)
+    layer = data_source.GetLayer()
+    extent = layer.GetExtent()
+    min_x, max_x, min_y, max_y = extent
+    return min_x, min_y, max_x, max_y
 
-        extent = layer.GetExtent()
-        min_x, max_x, min_y, max_y = extent
+def get_Shpfile_bbox_str(file_path) -> str:
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    data_source = driver.Open(file_path, 0)
+    layer = data_source.GetLayer()
+    extent = layer.GetExtent()
+    min_x, max_x, min_y, max_y = extent
+    bboxStr = str(round(min_x, 2))+','+str(round(min_y,2))+','+str(round(max_x,2))+','+str(round(max_y,2))
+    return bboxStr
 
-        return min_x, min_y, max_x, max_y
 
 ############################
 #### Datacube_ Extract  ####
@@ -629,13 +665,20 @@ def dc_serach(cfg: DictConfig)-> str :
     out = instantiate(OmegaConf.create(cfg.dc_Extract_params['dc_search']))
     return out
 
-def dc_extraction(cfg: DictConfig)-> str:
+def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
     '''
     Configurate the call of extract_cog() with hydra parameters.
     return the output path of the extracted file.
     '''
-    out = instantiate(OmegaConf.create(cfg.dc_Extract_params['dc_extrac_cog']))
+    dict_DcExtract = OmegaConf.create(cfg.dc_Extract_params['dc_extrac_cog'])
+    if args is not None:
+        dict_DcExtract = updateDict(dict_DcExtract,args)
+    print(f"New dcExtract Dict:  {dict_DcExtract}")
+   
+    ##  procede to extraction
+    out = instantiate(dict_DcExtract)
     return out
+
 
     
 #########################
@@ -1023,12 +1066,12 @@ def checkTifExtention(fileName):
         return fileName
 
 def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
-        '''
-        Import the tails in the url <tail_URL_NamesList>, 
-          to the local directory defined in <localPath>.
-        '''
-        confirmedLocalPath = ensureDirectory(localPath)
-        for url in tail_URL_NamesList:
-            download_url(url, confirmedLocalPath)
-        print(f"Tails downloaded to: {confirmedLocalPath}")
+    '''
+    Import the tails in the url <tail_URL_NamesList>, 
+        to the local ydirectory defined in <localPath>.
+    '''
+    confirmedLocalPath = ensureDirectory(localPath)
+    for url in tail_URL_NamesList:
+        download_url(url, confirmedLocalPath)
+    print(f"Tails downloaded to: {confirmedLocalPath}")
 

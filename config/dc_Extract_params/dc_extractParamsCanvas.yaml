@@ -7,7 +7,7 @@ dc_extrac_cog:
  _target_: dc_extract.extract_cog.extract_cog.extract_cog
  collections : 'cdem:dem'
  bbox_crs: 'EPSG:4326' 
- bbox: '-123.34,52.06,-121.40,53.0' 
+ bbox: ''
 # dc_extract_cog's list of params:
 #  field_value : 1 # str, int, float
 #  field_id : 'Id' #str
