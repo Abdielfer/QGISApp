@@ -707,6 +707,39 @@ def get_Shpfile_bbox_str(file_path) -> str:
     bboxStr = str(round(min_x, 2))+','+str(round(min_y,2))+','+str(round(max_x,2))+','+str(round(max_y,2))
     return bboxStr
 
+def computeProximity(inRaster, outPath: os.path = None) -> os.path:
+    '''
+    Compute the horizontal distance to features in the input raster.
+    @inRaster: A raster with features to mesure proximity from. 
+    @outPath: Path to save the output raster. If None,the output is create in the same folder as input.
+    @values: list of values to be considered as terget in the inRaster. Default [1]. 
+    '''
+    if outPath is None:  
+        path,communName,_ = get_parenPath_name_ext(inRaster)
+        # Create output name
+        outPath =os.path.join(path,str(communName+'_proximity.tif'))
+    ds = gdal.Open(inRaster, 0)
+    band = ds.GetRasterBand(1)
+    gt = ds.GetGeoTransform()
+    sr = ds.GetProjection()
+    cols = ds.RasterXSize
+    rows = ds.RasterYSize
+
+    # create empty proximity raster
+    driver = gdal.GetDriverByName('GTiff')
+    out_ds = driver.Create(outPath, cols, rows, 1, gdal.GDT_Float32)
+    out_ds.SetGeoTransform(gt)
+    out_ds.SetProjection(sr)
+    out_band = out_ds.GetRasterBand(1)
+
+    # compute proximity
+    gdal.ComputeProximity(band, out_band, ['VALUES= 1', 'DISTUNITS=PIXEL'])
+    # delete input and output rasters
+    del ds, out_ds
+    return outPath
+
+
+
 
 ############################
 #### Datacube_ Extract  ####

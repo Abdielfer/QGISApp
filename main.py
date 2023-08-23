@@ -50,9 +50,8 @@ def main(cfg: DictConfig):
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     
-    DEMMap = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_FullBasin_Clip.map'
-    LDDPath = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesne_LDD.map'
-    U.extra(DEMMap,LDDPath)
+    DEMMap = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel_mainRiverBinary.tif'
+    U.computeProximity(DEMMap)
 
     ###################################
     # csv = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasins.csv'
