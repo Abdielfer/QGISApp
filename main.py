@@ -11,55 +11,6 @@ import pcraster as pcr
 from pcraster import *
 # from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance of the license are created, it can kill my license. Thank you!!
 
-def test(DEMPath,LDD) -> os.path:
-    '''
-    NOTE: Important to ensure the input DEM has a well defined NoData Value ex. -9999. 
-
-    1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
-    2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
-    3- Read DEM in PCRasterformat
-    4- Compute flow direction with d8 algorithm -> lddcreate()
-    5- Compute strahler Order-> streamorder(FlowDir)
-    
-    @DEMPath : Input path to the DEM in *.tif format.
-    @HANDPath : Output path for the HAND.map result.
-    
-    '''
-    path,communName,_ = U.get_parenPath_name_ext(DEMPath)
-    subCatch =os.path.join(path,str(communName+'_subCatch.map'))
-    areaMinPath = os.path.join(path,str(communName+'_areaMin.map'))
-    areaMaxPath = os.path.join(path,str(communName+'_areaMax.map'))
-    outletsPath = os.path.join(path,str(communName+'_Outlets.map'))
-    FAccByCatchment = os.path.join(path,str(communName+'_MaxFAcc.map'))
-    pcr.setclone(DEMPath)
-    DEM = pcr.readmap(DEMPath)
-    FlowDir = pcr.readmap(LDD)
-    threshold = 8
-    print('#####......Computing Strahler order.......######')
-    strahlerOrder = streamorder(FlowDir)
-    strahlerRiver = ifthen(strahlerOrder>=threshold,strahlerOrder)
-    print('#####......Finding outlets.......######')
-    junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
-    outlets = ordinal(cover(uniqueid(junctions),0))
-    pcr.report(outlets,outletsPath)
-    print('#####......Calculating subcatchment.......######')
-    subCatchments = catchment(FlowDir,outlets)
-    pcr.report(subCatchments,subCatch)
-    print('#####......Computing HAND.......######')
-    massMap = pcr.spatial(pcr.scalar(1.0))
-    Resultflux = accuflux(ldd, massMap)
-    FAccByCatchment = areamaximum(Resultflux,Resultflux)
-    areaMin = areaminimum(DEM,subCatchments)
-    areaMax = areamaximum(DEM,subCatchments)
-    pcr.report(areaMin,areaMinPath)
-    pcr.report(areaMax,areaMaxPath)
-    pcr.report(FAccByCatchment,areaMinPath)
-
-    aguila(areaMin)
-    aguila(areaMax)
-    pass
-
-
 def settingsForClipDEMAndHandComputing(maskVectorPath:os.path)-> Tuple:
     '''
     To be run after dc_extract. Make sure the dc_output directory contains only one file (The right one..)
@@ -101,7 +52,7 @@ def main(cfg: DictConfig):
     
     DEMMap = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_FullBasin_Clip.map'
     LDDPath = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesne_LDD.map'
-    test(DEMMap,LDDPath)
+    U.extra(DEMMap,LDDPath)
 
     ###################################
     # csv = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasins.csv'

@@ -450,6 +450,68 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     translateRaster(HANDPath,handTifOut)
     return handTifOut
 
+def extractHydroFeatures(DEMPath,LDD) -> bool:
+    '''
+    NOTE: Important to ensure the input DEM has a well defined NoData Value ex. -9999. 
+    1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
+    2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
+    3- Read DEM in PCRasterformat
+    4- Compute strahler Order-> streamorder(FlowDir)
+    5- Compute main river -> streamorder >= 10
+    6- Extract outlets: Defines as outlet all the intersections in the river network.
+    7- Compute subcatchment extention corresponding to each outlet.
+    8- Compute flow accumulation (in cell numbers)
+
+    Some other measurements are available as options. Uncomment the lines to compute and/or save. 
+    
+    @DEMPath : Input path to the DEM in *.tif format.
+    @LDDPath : Input path to a precalculated LDD map through (pcr.lddcreation())
+    @Return: <True> if the process is complete without error. Otherwhise, you'll receive an error from the PCRaster algorithm. 
+    
+    '''
+    path,communName,_ = get_parenPath_name_ext(DEMPath)
+    # Create output names
+    subCatchPath =os.path.join(path,str(communName+'_subCatch.map'))
+    areaMinPath = os.path.join(path,str(communName+'_areaMin.map'))
+    areaMaxPath = os.path.join(path,str(communName+'_areaMax.map'))
+    outletsPath = os.path.join(path,str(communName+'_Outlets.map'))
+    flowAccumulationPath = os.path.join(path,str(communName+'_FlowAcc.map'))
+    maxFAccByCatchmentPath = os.path.join(path,str(communName+'_MaxFAcc.map'))
+    strahlerOrderPath = os.path.join(path,str(communName+'_StrahOrder.map'))
+    mainRiverPath = os.path.join(path,str(communName+'_mainRiverPath.map'))
+    
+    pcr.setclone(DEMPath)
+    DEM = pcr.readmap(DEMPath)
+    FlowDir = pcr.readmap(LDD)
+    print('#####......Computing Strahler order.......######')
+    threshold = 8
+    strahlerOrder = streamorder(FlowDir)
+    strahlerRiver = ifthen(strahlerOrder >=threshold,strahlerOrder)
+    MainRiver = ifthen(strahlerOrder >= 10,strahlerOrder)
+    pcr.report(strahlerRiver,strahlerOrderPath)
+    pcr.report(MainRiver,mainRiverPath)
+    print('#####......Finding outlets.......######')
+    junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
+    outlets = ordinal(cover(uniqueid(junctions),0))
+    pcr.report(outlets,outletsPath)
+    print('#####......Calculating subcatchment.......######')
+    subCatchments = catchment(FlowDir,outlets)
+    pcr.report(subCatchments,subCatchPath)
+    print('#####......Computing subcatchment measures.......######')
+    massMap = pcr.spatial(pcr.scalar(1.0))
+    flowAccumulation = accuflux(FlowDir, massMap)
+    MaxFAccByCatchment = areamaximum(flowAccumulation,subCatchments)
+    # areaMin = areaminimum(DEM,subCatchments)    # Optional
+    # areaMax = areamaximum(DEM,subCatchments)    # Optional
+    
+    ## Saving subcatchment measures
+    pcr.report(flowAccumulation,flowAccumulationPath)
+    # pcr.report(areaMin,areaMinPath)    # Optional
+    # pcr.report(areaMax,areaMaxPath)    # Optional
+    pcr.report(MaxFAccByCatchment,maxFAccByCatchmentPath)
+    
+    return True
+
 
 ######################
 ####   GDAL Tools  ###
