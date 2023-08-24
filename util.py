@@ -363,8 +363,13 @@ def createRaster(savePath:os.path, data:np.array, profile, noData:int = None):
             print("Created new raster>>>")
     return savePath
    
-def plotHistogram(raster, bins: int=50, bandNumber: int = 1):
-    show_hist(source=raster, bins=bins, title= f"Histogram of {bandNumber} bands", 
+def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int = 1):
+    if CustomTitle is not None:
+        title = CustomTitle
+    else:
+        title = f"Histogram of band : {bandNumber}"
+        
+    show_hist(source=raster, bins=bins, title= title, 
           histtype='stepfilled', alpha=0.5)
     return True
 
@@ -375,22 +380,27 @@ def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> 
     return rasterDataNan
 
 def computeRaterStats(rasterPath:os.path):
-
     '''
     Read a reaste and return: 
     @Return
     @rasMin: Raster min.
     @rasMax: Raster max.
     @rasMean: Rater mean.
-    @rasNoNaNSum: Raster sum of NOT NoData pixels
+    @rasMode: Raster mode.
+    @rasSTD: Raster standard deviation.
     @rasNoNaNCont: Raster count of all NOT NoData pixels
     '''
     rasDataNan = replaceRastNoDataWithNan(rasterPath)
-    rasMin = np.min(rasDataNan)
-    rasMax = np.max(rasDataNan)
-    rasMean = np.mean(rasDataNan)
+    rasMin = np.nanmin(rasDataNan)
+    rasMax = np.nanmax(rasDataNan)
+    rasMean = np.nanmean(rasDataNan)
+    rasSTD = np.nanstd(rasDataNan)
     rasNoNaNCont = np.count_nonzero(rasDataNan != np.nan)
-    return rasMin, rasMax, rasMean, rasNoNaNCont
+    # Compute mode
+    vals,counts = np.unique(rasDataNan, return_counts=True)
+    index = np.argmax(counts)
+    rasMode = vals[index]
+    return rasMin, rasMax, rasMean,rasMode, rasSTD, rasNoNaNCont
 
 
 ######################
@@ -831,7 +841,7 @@ class WbT_dtmTransformer():
             no_edges=True, 
             callback=default_callback
             )
-        output = addSubstringToName(inDTMName,"_filled")
+        output = addSubstringToName(inDTMName,"_filled_WangLiu")
         wbt.fill_depressions_wang_and_liu(
             dtmMissingDataFilled, 
             output, 

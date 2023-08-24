@@ -50,13 +50,19 @@ def main(cfg: DictConfig):
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     
-    DEMMap = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.tif'
-    DEMTranf = U.WbT_dtmTransformer(workingDir=r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data')
+    cdem = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\cdsm16m\QC_Quebec.tif'
+    DEMTranf = U.WbT_dtmTransformer(workingDir=r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\cdsm16m') 
+    cdemFill = DEMTranf.fixNoDataAndfillDTM(cdem)
+    cdemMin,cdemMax, rcdemMean,cdemMode, cdemSTD,_ = U.computeRaterStats(cdemFill)
+    cdemSlope = DEMTranf.computeSlope(cdemFill)
+    cdem_SlpMin,cdem_SlpMax, rcdem_SlpMean,cdem_SlpMode, cdem_SlpSTD,_ = U.computeRaterStats(cdemSlope)
+    # cdemFAcc = DEMTranf.DInfFlowCalculation(cdemSlope)
+    # cdem_FAccMin,cdem_FAccMax, rcdem_FAccMean,cdem_FAccMode, cdem_FAccSTD,_ = U.computeRaterStats(cdemFAcc) 
+    print(f"Elevation stat: min={cdemMin}, max={cdemMax},mean= {rcdemMean}, mode={cdemMode}, std={cdemSTD} \n ")
+    print(f"Slope stat: min={cdem_SlpMin}, max={cdem_SlpMax},mean= {rcdem_SlpMean}, mode={cdem_SlpMode}, std={cdem_SlpSTD} \n")
+    # print(f"FAcc stat: min={cdem_FAccMin}, max={cdem_FAccMax},mean= {rcdem_FAccMean}, mode={cdem_FAccMode}, std={cdem_FAccSTD} \n")
+    U.plotHistogram(cdemFill,CustomTitle='Elevation histogram')
     
-    
-    DEMTranf.fixNoDataAndfillDTM(DEMMap)
-    
-
     ###################################
     # csv = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasins.csv'
     # listOfPath = U.createListFromCSV(csv)
