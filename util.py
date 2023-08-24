@@ -800,8 +800,8 @@ wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code
     ## Pretraitment #
 class WbT_dtmTransformer():
     '''
-     This class contain some functions to generate geomorphological and hydrological features from DTM.
-    Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar 1 m or < 2m. 
+     This class contain some functions to generate geomorphological and hydrological features from DEM.
+    Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar derived  1m or < 2m. 
     '''
     def __init__(self, workingDir:str = None) -> None:
         if (workingDir is not None and os.path.isdir(workingDir)): # Creates output dir if it does not already exist 
@@ -809,7 +809,7 @@ class WbT_dtmTransformer():
             wbt.set_working_dir(workingDir)
         print(f"Working dir at: {self.workingDir}")    
         
-    def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = True)-> os.path:
+    def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = False)-> os.path:
         '''
         Ref:   https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#filldepressions
         To ensure the quality of this process, this method execute several steep in sequence, following the Whitebox’s authors recommendation (For mor info see the above reference).
@@ -832,7 +832,7 @@ class WbT_dtmTransformer():
             back_value=0.0, 
             callback=default_callback
             )
-        dtmMissingDataFilled = inDTMName
+        dtmMissingDataFilled = addSubstringToName(inDTMName,'_MissingDataFilled')
         wbt.fill_missing_data(
             dtmNoDataValueSetted, 
             dtmMissingDataFilled, 
@@ -932,7 +932,6 @@ class WbT_dtmTransformer():
             )
         return output
 
-    ### Ready  ####
     def computeSlope(self,inDTMName):
         outSlope = addSubstringToName(inDTMName,'_Slope')
         wbt.slope(inDTMName,
@@ -951,7 +950,36 @@ class WbT_dtmTransformer():
                 callback=default_callback
                 )
         return outAspect
-    
+
+    def computeRasterHistogram(self,inRaster):
+        '''
+        For details see Whitebox Tools references at:
+        https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html?#RasterHistogram
+        
+        '''
+        output = addSubstringToName(inRaster,'_histogram')
+        output = replaceExtention(output, '.html')
+        wbt.raster_histogram(
+            inRaster, 
+            output, 
+            callback=default_callback
+            )   
+        return output
+
+    def rasterCalculator(self, output, statement:str)-> os.path:
+        '''
+        For details see Whitebox Tools references at:
+        https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html#RasterCalculator
+        
+        @statement : string of desired opperation. Raster must be cuoted inside the statement str. ex "'raster1.tif' - 'rater2.tif'"
+        '''
+        wbt.raster_calculator(
+            output, 
+            statement, 
+            callback=default_callback
+            )
+        return output
+
     def get_WorkingDir(self):
         return str(self.workingDir)
     
