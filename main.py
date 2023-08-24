@@ -50,8 +50,12 @@ def main(cfg: DictConfig):
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     
-    DEMMap = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel_mainRiverBinary.tif'
-    U.computeProximity(DEMMap)
+    DEMMap = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.tif'
+    DEMTranf = U.WbT_dtmTransformer(workingDir=r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data')
+    
+    
+    DEMTranf.fixNoDataAndfillDTM(DEMMap)
+    
 
     ###################################
     # csv = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasins.csv'

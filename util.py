@@ -788,20 +788,18 @@ wbt.set_verbose_mode(True)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
     ## Pretraitment #
-class dtmTransformer():
+class WbT_dtmTransformer():
     '''
      This class contain some functions to generate geomorphological and hydrological features from DTM.
-    Functions are mostly based on WhiteBoxTools libraries. For optimal functionality DTM’s most be high resolution, 
-    ideally Lidar 1 m or < 2m. 
+    Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar 1 m or < 2m. 
     '''
-    def __init__(self, workingDir:os.path = None) -> os.path:
-        if not os.path.isdir(workingDir): # Creates output dir if it does not already exist 
+    def __init__(self, workingDir:str = None) -> None:
+        if (workingDir is not None and os.path.isdir(workingDir)): # Creates output dir if it does not already exist 
             self.workingDir = workingDir
             wbt.set_working_dir(workingDir)
         print(f"Working dir at: {self.workingDir}")    
-        return self.workingDir
         
-    def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = True):
+    def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = True)-> os.path:
         '''
         Ref:   https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#filldepressions
         To ensure the quality of this process, this method execute several steep in sequence, following the Whitebox’s authors recommendation (For mor info see the above reference).
@@ -812,18 +810,19 @@ class dtmTransformer():
         4-	Remove intermediary results to save storage space (Optionally you can keep it. See @Arguments).  
         @Argument: 
         -inDTMName: Input DTM name
-        -eraseIntermediateRasters(default = False): Erase intermediate results to save storage space. 
-        @Return: True if all process happened successfully, EROR messages otherwise. 
+        -eraseIntermediateRasters(default = True): Erase intermediate results to save storage space. 
+        @Return: True if all process happened successfully, ERROR messages otherwise. 
         @OUTPUT: DTM <filled_ inDTMName> Corrected DTM with wang_and_liu method. 
         '''
-        dtmNoDataValueSetted = "noDataOK_"+inDTMName
+        dtmNoDataValueSetted = addSubstringToName(inDTMName,'_NoDataOK')
+        
         wbt.set_nodata_value(
             inDTMName, 
             dtmNoDataValueSetted, 
             back_value=0.0, 
             callback=default_callback
             )
-        dtmMissingDataFilled = "correctedNoData_"+inDTMName
+        dtmMissingDataFilled = inDTMName
         wbt.fill_missing_data(
             dtmNoDataValueSetted, 
             dtmMissingDataFilled, 
@@ -832,9 +831,7 @@ class dtmTransformer():
             no_edges=True, 
             callback=default_callback
             )
-        name,_ = splitFilenameAndExtention(inDTMName)
-
-        output = name + "_filled.tif"
+        output = addSubstringToName(inDTMName,"_filled")
         wbt.fill_depressions_wang_and_liu(
             dtmMissingDataFilled, 
             output, 
@@ -847,8 +844,8 @@ class dtmTransformer():
                 os.remove(os.path.join(wbt.work_dir,dtmNoDataValueSetted))
                 os.remove(os.path.join(wbt.work_dir,dtmMissingDataFilled))
             except OSError as error:
-                print("There was an error removing intermediate results.")
-        return True
+                print("There was an error removing intermediate results : \n {error}")
+        return output
 
     def d8FPointerRasterCalculation(self, inFilledDTMName):
         '''
@@ -856,7 +853,7 @@ class dtmTransformer():
          @inFilledDTMName: DTM without spurious point ar depression.  
         @UOTPUT: D8_pioter: Raster tu use as input for flow direction and flow accumulation calculations. 
         '''
-        output = "d8Pointer_" + inFilledDTMName
+        output = addSubstringToName(inFilledDTMName,"_d8Pointer")
         wbt.d8_pointer(
             inFilledDTMName, 
             output, 
@@ -865,7 +862,7 @@ class dtmTransformer():
             )
     
     def d8_flow_accumulation(self, inFilledDTMName):
-        d8FAccOutputName = "d8fllowAcc"+inFilledDTMName
+        d8FAccOutputName = addSubstringToName(inFilledDTMName,"_d8fllowAcc" ) 
         wbt.d8_flow_accumulation(
             inFilledDTMName, 
             d8FAccOutputName, 
@@ -876,20 +873,8 @@ class dtmTransformer():
             esri_pntr=False, 
             callback=default_callback
             ) 
-            
-    def dInfFlowAcc(self, inFilledDTMName, id,  userLog: bool):
-        output = id
-        wbt.d_inf_flow_accumulation(
-            inFilledDTMName, 
-            output, 
-            out_type="ca", 
-            threshold=None, 
-            log=userLog, 
-            clip=False, 
-            pntr=False, 
-            callback=default_callback
-        )
-  
+        return d8FAccOutputName
+    
     def jensePourPoint(self,inOutlest,d8FAccOutputName):
         jensenOutput = "correctedSnapPoints.shp"
         wbt.jenson_snap_pour_points(
@@ -902,7 +887,7 @@ class dtmTransformer():
         print("jensePourPoint Done")
 
     def watershedConputing(self,d8Pointer, jensenOutput):  
-        output = "watersheds_" + d8Pointer
+        output = addSubstringToName(d8Pointer, "_watersheds")
         wbt.watershed(
             d8Pointer, 
             jensenOutput, 
@@ -924,7 +909,7 @@ class dtmTransformer():
         @Output: 
             DInfFlowAcculation map. 
         '''
-        output = "dInf_" + inD8Pointer
+        output = addSubstringToName(inD8Pointer,"_dInfFAcc")
         wbt.d_inf_flow_accumulation(
             inD8Pointer, 
             output, 
@@ -935,25 +920,33 @@ class dtmTransformer():
             pntr=True, 
             callback=default_callback
             )
+        return output
 
     ### Ready  ####
-    def computeSlope(self,inDTMName,outSlope):
+    def computeSlope(self,inDTMName):
+        outSlope = addSubstringToName(inDTMName,'_Slope')
         wbt.slope(inDTMName,
                 outSlope, 
                 zfactor=None, 
                 units="degrees", 
                 callback=default_callback
                 )
+        return outSlope
     
     def computeAspect(self,inDTMName):
-        outAspect = 'aspect_'+ inDTMName
+        outAspect = addSubstringToName(inDTMName,'_aspect')
         wbt.aspect(inDTMName, 
                 outAspect, 
                 zfactor=None, 
                 callback=default_callback
                 )
+        return outAspect
+    
     def get_WorkingDir(self):
         return str(self.workingDir)
+    
+    def set_WorkingDir(self,NewWDir):
+        wbt.set_working_dir(NewWDir)
 
 class generalRasterTools():
     def __init__(self, workingDir):
@@ -1085,9 +1078,9 @@ class generalRasterTools():
         with rio.open(input_gtif) as src:
         # Extract spatial metadata
             input_crs = src.crs
-            input_gt  = src.transform
+            input_gtif  = src.transform
             src.close()
-            return input_crs, input_gt  
+            return input_crs, input_gtif  
 
     def set_CRS_GTIF(self,input_gtif, output_tif, in_crs):
         arr, kwds = self.separate_array_profile(self, input_gtif)
