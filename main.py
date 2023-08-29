@@ -36,13 +36,13 @@ def logger(cfg: DictConfig, nameByTime):
     logging.info(f"Output directory :{cfg['output_dir']}")
     # logging.info(f"dc_search inputs: {cfg.dc_Extract_params.dc_search}")
     # logging.info(f"dc_description inputs: {cfg.dc_Extract_params.dc_describeCollections}")
-    logging.info(f"dc_extract inputs: {cfg.dc_Extract_params.dc_extrac_cog}")
+    # logging.info(f"dc_extract inputs: {cfg.dc_Extract_params.dc_extrac_cog}")
 
-def createShpList(parentDir):
+def createShpList(parentDir)-> os.path:
     listOfPath = U.listALLFilesInDirByExt_fullPath(parentDir,ext='.shp')
     OutCSVPath = os.path.join(parentDir,'listOfShpFiles.csv')
     U.createCSVFromList(OutCSVPath,listOfPath)
-
+    return OutCSVPath 
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
@@ -57,11 +57,14 @@ def main(cfg: DictConfig):
     print(f"cdem Name = {cdemName}")
     DEMTranf = U.WbT_dtmTransformer(workingDir=paretPath) 
     # cdemFill = DEMTranf.fixNoDataAndfillDTM(cdem)
-    difRaster = U.addSubstringToName(cdem,'_CdemFillMenusCDEM_tets')
-    statement = str(cdemFill+' - '+"'"+cdemName+"'" +" > 0.05") # Remouve some noice because of aproximation with -0.05
+    difRaster = U.addSubstringToName(cdem,'_CdemFillMenusCDEM_tets3')
+    statement = str(cdemFill+' - '+"'"+cdemName+"'"+" > 0.005") # Remouve some noice because of aproximations with -0.05
     print(f"Statement : {statement}")
     DEMTranf.rasterCalculator(difRaster, statement)
-    
+    inRatser = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\cdsm16m\QC_Quebec_CdemFillMenusCDEM_tets.tif'
+    # ##############   Test percent of transformed areas.
+    U.plotHistComparison(cdem,inRatser)
+        
     # cdemFill2 = np.round(cdemFill,2).astype('float32')
     # cdemMin,cdemMax, rcdemMean,cdemMode, cdemSTD,_ = U.computeRaterStats(cdemFill)
     # cdemSlope = DEMTranf.computeSlope(cdemFill)
@@ -88,7 +91,8 @@ def main(cfg: DictConfig):
     #     U.computeHAND(clipPath,HANDPath)
     ###################################
 
-
 if __name__ == "__main__":
     with U.timeit():
         main()  
+
+

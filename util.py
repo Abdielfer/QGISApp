@@ -274,11 +274,9 @@ def createCSVFromList(pathToSave: os.path, listData:list):
     return True
  
 
-
-
-###########            
-### GIS ###
-###########
+###################            
+### General GIS ###
+###################
 
 def plotImageAndMask(img, mask,imgName:str='Image', mskName: str= 'Mask'):
     # colList = ['Image','Mask']
@@ -326,11 +324,63 @@ def updateDict(dic:dict, args:dict)->dict:
             outDic[k]= args[k]
     return outDic
 
+def plotHistComparison(DEM1,DEM2, bins:int = 50):
+    # Reding raster 1:
+    data_DEM1,_= readRasterWithRasterio(DEM1)  # Return an Array
+    data_DEM1 = np.resize(data_DEM1,(1))
+    # Reding raster 2:
+    data_DEM2,_= readRasterWithRasterio(DEM2)  # Return an Array
+    # data_DEM2 = np.resize(data_DEM2,(1))
+    # Setting plot
+    n_bins = bins
+    fig, ax = plt.subplots(1,sharey=True, tight_layout=True)
+    # x=np.array((data_DEM1[0],data_DEM2[0]))
+    
+    ax.hist(data_DEM1, n_bins, density=True, histtype='step', label=['cdem'],stacked=True, fill=False)
+    # ax.hist(data_DEM2[0], n_bins, density=True, histtype='step', label=colors,stacked=True, fill=False)
+    ax.legend(prop={'size': 10})
+    ax.set_title('cdem_16m vs srdem_8m') 
+    
+    fig.tight_layout()
+    plt.show()
+    pass
+
+def reporSResDEMComparison(DEM1,DEM2):
+    '''
+    The goal of this function is to evaluate the DEM enhancement with Super Resolution algorithms. 
+    Data:
+    cdem: Canadian Digital Elevation Model at 16m resolution.
+    srdem: Super Resolution Algorithm Output at 8m resolution. 
+
+    Goals: Evaluate the impact of Super-Resolution algorithms in the cdem transformation. 
+
+        The similarity between the source cdem and srdem will be evaluated through statistics and products derived from the DEM. 
+
+    Proposed measurements of comparison (description): 
+
+        - Elevation statistics' summary comparison:
+                Compute mean, std, mode, max and min. Compare the histograms. 
+        
+        - Slope statistics' summary:
+                Compute mean, std, mode, max and min. Compare the histograms.
+
+        - Flow Accumulation summary:
+                Compute mean, std, mode, max and min. Compare the histograms.
+
+        - Filled area comparison: 
+                Fill the DEM depressions and pits with WhangAndLiu algorithms. Compute the percentage of transformed ares on each dem (cdem_16m and srdem_8m). Compare the percentage of transformed areas. 
+
+        - River network visual comparison:
+                Compute strahler order (up to 5th order) and main streams (up to 3rd order). Create maps (Vector) with overlaps of both networks.
+            
+    '''
+
+
 #######################
 ### Rasterio Tools  ###
 #######################
 
-def readRaster(rasterPath:os.path) -> tuple[np.array, dict]:
+def readRasterWithRasterio(rasterPath:os.path) -> tuple[np.array, dict]:
     '''
     Read a raster with Rasterio.
     return:
@@ -340,7 +390,7 @@ def readRaster(rasterPath:os.path) -> tuple[np.array, dict]:
     inRaster = rio.open(rasterPath, mode="r")
     profile = inRaster.profile
     rasterData = inRaster.read()
-    # print(f"raster data shape in ReadRaster : {rasterData.shape}")
+    print(f"raster data shape in ReadRaster : {rasterData.shape}")
     return rasterData, profile
 
 def createRaster(savePath:os.path, data:np.array, profile, noData:int = None):
@@ -367,9 +417,10 @@ def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int 
     if CustomTitle is not None:
         title = CustomTitle
     else:
-        title = f"Histogram of band : {bandNumber}"
-        
-    show_hist(source=raster, bins=bins, title= title, 
+        title = f"Histogram of band : {bandNumber}"    
+    data,_ = readRasterWithRasterio(raster)
+    
+    show_hist(source=data, bins=bins, title= title, 
           histtype='stepfilled', alpha=0.5)
     return True
 
@@ -402,10 +453,21 @@ def computeRaterStats(rasterPath:os.path):
     rasMode = vals[index]
     return rasMin, rasMax, rasMean,rasMode, rasSTD, rasNoNaNCont
 
+def computeRasterValuePercent(rasterPath, value:int=1)-> float:
+    '''
+    Compute the percent of pixels of value <value: default =1> in a raster. 
+    @rasterPath: Path to the raster to be analyzed.
+    @value: Value to verify percent in raster. Default = 1. 
+    @return: The computed percent of <value> within the nonNoData values in the input raster.  
+    '''
+    rasDataNan = replaceRastNoDataWithNan(rasterPath)
+    rasNoNaNCont = np.count_nonzero(rasDataNan != np.nan)
+    valuCont = np.count_nonzero(rasDataNan == value)
+    return (valuCont/rasNoNaNCont)*100
 
-######################
-####   PCRaster   ####
-######################
+###########################
+####   PCRaster Tools  ####
+###########################
 
 def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,saveSubCath:bool = False) -> os.path:
     '''
@@ -717,11 +779,11 @@ def get_Shpfile_bbox_str(file_path) -> str:
     bboxStr = str(round(min_x, 2))+','+str(round(min_y,2))+','+str(round(max_x,2))+','+str(round(max_y,2))
     return bboxStr
 
-def computeProximity(inRaster, outPath: os.path = None) -> os.path:
+def computeProximity(inRaster, value:int= 1, outPath: os.path = None) -> os.path:
     '''
     Compute the horizontal distance to features in the input raster.
     @inRaster: A raster with features to mesure proximity from. 
-    @outPath: Path to save the output raster. If None,the output is create in the same folder as input.
+    @outPath: Path to save the output raster. If None,the output is create in the same folder as the input with prefix: <_proximity.tif>.
     @values: list of values to be considered as terget in the inRaster. Default [1]. 
     '''
     if outPath is None:  
@@ -743,12 +805,10 @@ def computeProximity(inRaster, outPath: os.path = None) -> os.path:
     out_band = out_ds.GetRasterBand(1)
 
     # compute proximity
-    gdal.ComputeProximity(band, out_band, ['VALUES= 1', 'DISTUNITS=PIXEL'])
+    gdal.ComputeProximity(band, out_band, ['VALUES= {value}', 'DISTUNITS=PIXEL'])
     # delete input and output rasters
     del ds, out_ds
     return outPath
-
-
 
 
 ############################
@@ -955,7 +1015,7 @@ class WbT_dtmTransformer():
         '''
         For details see Whitebox Tools references at:
         https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html?#RasterHistogram
-        
+        @return: An *.html file with the computed histogram. The file is autoloaded. 
         '''
         output = addSubstringToName(inRaster,'_histogram')
         output = replaceExtention(output, '.html')
