@@ -178,21 +178,25 @@ def createListFromCSV(csv_file_location, delim:str =','):
         out.append(df.iloc[i,:].tolist()[0])    
     return out
 
-def createListFromCSVColumn(csv_file_location, col_idx:int, delim:str =','):  
+def createListFromCSVColumn(csv_file_location, col_idx, delim:str =','):  
     '''
     @return: list from <col_id> in <csv_file_location>.
     Argument:
-    @col_index: 
     @csv_file_location: full path file location and name.
-    @col_idx : number of the desired collumn to extrac info from (Consider index 0 for the first column)
+    @col_idx : number or str(name)of the desired collumn to extrac info from (Consider index 0 <default> for the first column, if no names are assigned in csv header.)
+    @delim: Delimiter to pass to pd.read_csv() function. Default = ','.
     '''       
     x=[]
-    df = pd.read_csv(csv_file_location, index_col= None, delimiter = delim)
-    fin = df.shape[0]
-    for i in range(0,fin):
-        x.append(df.iloc[i,col_idx])
+    df = pd.read_csv(csv_file_location,index_col=None, delimiter = delim)
+    if isinstance(col_idx,str):  
+        colIndex = df.columns.get_loc(col_idx)
+    elif isinstance(col_idx,int): 
+        colIndex = col_idx
+    fin = df.shape[0] ## rows count.
+    for i in range(0,fin): 
+        x.append(df.iloc[i,colIndex])
     return x
-
+ 
 def createListFromExelColumn(excell_file_location,Sheet_id:str, col_idx:str):  
     '''
     @return: list from <col_id> in <excell_file_location>.
@@ -822,7 +826,7 @@ def dc_describe(cfg: DictConfig)-> bool:
     instantiate(OmegaConf.create(cfg.dc_Extract_params['dc_describeCollections']))
     return True
 
-def dc_serach(cfg: DictConfig)-> str :
+def dc_search(cfg: DictConfig)-> str :
     '''
     Configurate the call of d.search()  with hydra parameters.
     return the output path of the search result.
@@ -844,11 +848,10 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
     out = instantiate(dict_DcExtract)
     return out
 
-
     
-#########################
-####   WhiteBoxTools  ###
-#########################
+######################################
+####   WhiteBoxTools and  Rasterio ###
+######################################
 
 ## LocalPaths and global variables: to be adapted to your needs ##
 currentDirectory = os.getcwd()
@@ -1095,7 +1098,9 @@ class generalRasterTools():
             method= resampleMethod, 
             callback=default_callback
             )
-    def mosaikAndResamplingFromCSV(self,csvName, outputResolution: int, csvColumn:str, clearTransitDir = True):
+        return outputFilePathAndName
+     
+    def mosaikAndResamplingFromCSV(self,csvName, outputResolution:int, csvColumn:str, clearTransitDir = True):
         '''
         Just to make things easier, this function download from *csv with list of dtm_url,
          do mosaik and resampling at once. 
@@ -1105,10 +1110,11 @@ class generalRasterTools():
         2- For *.csv in the nameList:
              - create destination Folder with csv name. 
              - import DTM into TransitFolder
-             - mosaik DTM in TransitFoldes if more than is downloaded.
+             - mosaik DTM in TransitFoldes if more than one is downloaded.
              - resample mosaik to <outputResolution> argument
              - clear TransitFolder
         '''
+        ## Preparing for download
         transitFolderPath = createTransitFolder(self.workingDir)
         sourcePath_dtm_ftp = os.path.join(self.workingDir, csvName) 
         name,ext = splitFilenameAndExtention(csvName)
@@ -1116,16 +1122,24 @@ class generalRasterTools():
         destinationFolder = makePath(self.workingDir,name)
         ensureDirectory(destinationFolder)
         dtmFtpList = createListFromCSVColumn(sourcePath_dtm_ftp,csvColumn)
+        
+        ## Download tails to transit folder
         downloadTailsToLocalDir(dtmFtpList,transitFolderPath)
         savedWDir = self.workingDir
         resamplerOutput = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
-        resamplerOutput_CRS_OK = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m_CRS_OK.tif'))
+        resamplerOutput_CRS_OK = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
         setWBTWorkingDir(transitFolderPath)
+        
+        ## recover all downloaded *.tif files path
         dtmTail = listFreeFilesInDirByExt(transitFolderPath, ext = '.tif')
-        crs,_ = self.get_CRSAndTranslation_GTIFF(self,dtmFtpList[0])
-        self.rasterResampler(self,dtmTail,resamplerOutput,outputResolution)
-        self.set_CRS_GTIF(self,resamplerOutput, resamplerOutput_CRS_OK, crs)
+        crs,_ = self.get_CRSAndTranslation_GTIFF(dtmFtpList[0])
+        
+        ## Merging tiles and resampling
+        self.rasterResampler(dtmTail,resamplerOutput,outputResolution)
+        self.set_CRS_GTIF(resamplerOutput, resamplerOutput_CRS_OK, crs)
         setWBTWorkingDir(savedWDir)
+        
+        ## Celaning transit folder. 
         if clearTransitDir: 
             clearTransitFolderContent(transitFolderPath)
 
@@ -1159,7 +1173,7 @@ class generalRasterTools():
         callback=default_callback
         )
     
-    def prepareInputForResampler(nameList):
+    def prepareInputForResampler(self,nameList):
         inputStr = ''   
         if len(nameList)>1:
             for i in range(len(nameList)-1):
@@ -1181,14 +1195,14 @@ class generalRasterTools():
             return input_crs, input_gtif  
 
     def set_CRS_GTIF(self,input_gtif, output_tif, in_crs):
-        arr, kwds = self.separate_array_profile(self, input_gtif)
+        arr, kwds = self.separate_array_profile(input_gtif)
         kwds.update(crs=in_crs)
         with rio.open(output_tif,'w', **kwds) as output:
             output.write(arr)
         return output_tif
 
     def set_Tanslation_GTIF(self, input_gtif, output_tif, in_gt):
-        arr, kwds = self.separate_array_profile(self, input_gtif)
+        arr, kwds = self.separate_array_profile(input_gtif)
         kwds.update(transform=in_gt)
         with rio.open(output_tif,'w', **kwds) as output:
             output.write(arr)

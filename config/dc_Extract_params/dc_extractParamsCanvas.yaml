@@ -5,9 +5,9 @@
 
 dc_extrac_cog:
  _target_: dc_extract.extract_cog.extract_cog.extract_cog
- collections : 'cdem:dem'
+ collections : 'hrdem-lidar:dtm'
  bbox_crs: 'EPSG:4326' 
- bbox: ''
+ bbox: '-71.55,46.74,-71.18,47.1'
 # dc_extract_cog's list of params:
 #  field_value : 1 # str, int, float
 #  field_id : 'Id' #str
@@ -27,20 +27,20 @@ dc_extrac_cog:
 
 dc_search:
  _target_: dc_extract.describe.describe.search
- name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example\search.gpkg'
- bbox: '-122.525,52.1357,-120.14,53.115'
+ name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\search\search.gpkg'
+ bbox: '-71.55,46.74,-71.18,47.1'
 #  urls: ['https://datacube.services.geo.ca/api']         
 #  dt: None
- cols: 'cdem'
+#  cols: 'hrdem'
 #  geojson: False
 
 dc_describeCollections: 
  _target_: dc_extract.describe.describe.collections
- name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\example\description.gpkg'
+ name: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\description\description.gpkg'
 #  urls: ['https://datacube.services.geo.ca/api'] 
 #  geojson : False 
 #________________________________________________________________
 # Values that can be shared by all functions:
 date_time : None  # datetime_str_in_ISO_8601_with_Z. (ex. str --> '2011-08-12T20:17:46.384Z') Optional defaults to None. 
-
+bbox : '-71.55,46.74,-71.18,47.1'
  
