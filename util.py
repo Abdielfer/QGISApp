@@ -429,7 +429,7 @@ def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int 
     return True
 
 def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> np.array:
-    rasterData,profil = readRaster(rasterPath)
+    rasterData,profil = readRasterWithRasterio(rasterPath)
     NOData = profil['nodata']
     rasterDataNan = np.where(((rasterData == NOData)|(rasterData == extraNoDataVal)), np.nan, rasterData) 
     return rasterDataNan
