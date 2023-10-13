@@ -5,9 +5,9 @@
 
 dc_extrac_cog:
  _target_: dc_extract.extract_cog.extract_cog.extract_cog
- collections : 'hrdem-lidar:dtm'
- bbox_crs: 'EPSG:4326' 
- bbox: '-71.55,46.74,-71.18,47.1'
+ collections : 'cdsm:dem'
+ bbox_crs: 'EPSG:3979' 
+ bbox: '-2064384.00,591792.00,-1524032.00,1080752.0'
 # dc_extract_cog's list of params:
 #  field_value : 1 # str, int, float
 #  field_id : 'Id' #str

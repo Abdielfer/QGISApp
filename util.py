@@ -3,13 +3,14 @@ import glob
 import pathlib
 import shutil
 from time import strftime
-from typing import Tuple
+from typing import Tuple, List, overload
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import rasterio as rio
 from rasterio.plot import show_hist
+from rasterio.enums import Resampling
 from datetime import datetime
 from whitebox.whitebox_tools import WhiteboxTools, default_callback
 import whitebox_workflows as wbw   
@@ -276,7 +277,13 @@ def createCSVFromList(pathToSave: os.path, listData:list):
     read_file.to_csv (pathToSave, index=None)
     removeFile(textPath)
     return True
- 
+
+def updateDict(dic:dict, args:dict)->dict:
+    outDic = dic
+    for k in args.keys():
+        if k in dic.keys():
+            outDic[k]= args[k]
+    return outDic
 
 ###################            
 ### General GIS ###
@@ -321,13 +328,6 @@ def reshape_as_raster(arr):
     '''
     return np.transpose(arr, [2, 0, 1])
 
-def updateDict(dic:dict, args:dict)->dict:
-    outDic = dic
-    for k in args.keys():
-        if k in dic.keys():
-            outDic[k]= args[k]
-    return outDic
-
 def plotHistComparison(DEM1,DEM2, bins:int = 50):
     # Reding raster 1:
     data_DEM1,_= readRasterWithRasterio(DEM1)  # Return an Array
@@ -349,35 +349,95 @@ def plotHistComparison(DEM1,DEM2, bins:int = 50):
     plt.show()
     pass
 
-def reporSResDEMComparison(DEM1,DEM2):
+def getNeighboursValues(raster)-> np.array:
     '''
-    The goal of this function is to evaluate the DEM enhancement with Super Resolution algorithms. 
-    Data:
-    cdem: Canadian Digital Elevation Model at 16m resolution.
-    srdem: Super Resolution Algorithm Output at 8m resolution. 
-
-    Goals: Evaluate the impact of Super-Resolution algorithms in the cdem transformation. 
-
-        The similarity between the source cdem and srdem will be evaluated through statistics and products derived from the DEM. 
-
-    Proposed measurements of comparison (description): 
-
-        - Elevation statistics' summary comparison:
-                Compute mean, std, mode, max and min. Compare the histograms. 
-        
-        - Slope statistics' summary:
-                Compute mean, std, mode, max and min. Compare the histograms.
-
-        - Flow Accumulation summary:
-                Compute mean, std, mode, max and min. Compare the histograms.
-
-        - Filled area comparison: 
-                Fill the DEM depressions and pits with WhangAndLiu algorithms. Compute the percentage of transformed ares on each dem (cdem_16m and srdem_8m). Compare the percentage of transformed areas. 
-
-        - River network visual comparison:
-                Compute strahler order (up to 5th order) and main streams (up to 3rd order). Create maps (Vector) with overlaps of both networks.
-            
+    Inspect the 8 neighbours of each pixel to list their values. If the pixel being NoData, the neighbour list is empty. 
+    @raster: os.path to the raster to inst=pect.
+    @return: array of lists. 
     '''
+    # Convert raster to NumPy array
+    arr,profil = readRasterWithRasterio(raster)
+    NOData = profil['nodata']
+    # Get dimensions of array
+    rows, cols = arr.shape
+
+    # Create empty array to store neighbours
+    neighbours = np.empty((rows, cols), dtype=object)
+
+    # Iterate over each cell in array
+    for i in range(rows):
+        for j in range(cols):
+            # Get value of current cell
+            val = arr[i, j]
+
+            # Check if value is NaN or NoData
+            if np.isnan(val) or val == NOData:
+                neighbours[i, j] = []
+            else:
+                # Get indices of neighbouring cells
+                indices = [(i-1, j-1), (i-1, j), (i-1, j+1),
+                           (i, j-1),             (i, j+1),
+                           (i+1, j-1), (i+1, j), (i+1, j+1)]
+
+                # Get values of neighbouring cells
+                vals = [arr[x, y] for x, y in indices if 0 <= x < rows and 0 <= y < cols]
+                # Add values to neighbours array
+                neighbours[i, j] = vals
+
+    return neighbours
+
+@overload
+def getNeighboursValues(raster, shapefile) -> np.array:
+    """
+    This function takes a raster and a shapefile as input and returns an array with the same size of the input raster.
+    The inputs must be in the same reference system. The output array will contain at each cell a list of shape [1:8],
+    with the values of the 8 neighbours of the questioned pixel, starting from the left up corner. Consider only the pixels
+    that are not np.nan or noData value in any of the two input layers. If the questioned pixel is noData in any of the inputs
+    or np.nan, the list of neighbours values must be empty.
+    @raster: os.path to the raster to be inspect.
+    @shapefile: os.path to the shapefile to use as mask.
+    @return: array of lists. 
+    
+    """
+    
+    # Open raster file using Rasterio
+    with rio.open(raster) as src:
+        # Read raster data into a NumPy array
+        arr = src.read(1)
+        # Open shapefile using Rasterio
+        with rio.open(shapefile) as shp:
+            # Mask raster data using shapefile
+            mask = shp.dataset_mask()
+
+            # Create empty array to store neighbours
+            neighbours = np.empty_like(arr, dtype=object)
+
+            # Iterate over each cell in array
+            for i in range(arr.shape[0]):
+                for j in range(arr.shape[1]):
+                    # Get value of current cell
+                    val = arr[i, j]
+
+                    # Check if value is NaN or NoData in either input layer
+                    if np.isnan(val) or val == src.nodata or val == shp.nodata:
+                        neighbours[i, j] = []
+                    else:
+                        # Get indices of neighbouring cells
+                        indices = [(i-1, j-1), (i-1, j), (i-1, j+1),
+                                   (i, j-1),             (i, j+1),
+                                   (i+1, j-1), (i+1, j), (i+1, j+1)]
+
+                        # Get values of neighbouring cells that are not NaN or NoData in either input layer
+                        vals = [arr[x, y] for x, y in indices if 0 <= x < arr.shape[0] and 0 <= y < arr.shape[1]
+                                and not np.isnan(arr[x, y]) and arr[x, y] != src.nodata and arr[x, y] != shp.nodata]
+
+                        # Add values to neighbours array
+                        neighbours[i, j] = vals
+
+            # Apply mask to neighbours array
+            neighbours = np.ma.array(neighbours, mask=mask)
+
+    return neighbours.filled([])
 
 
 #######################
@@ -396,6 +456,17 @@ def readRasterWithRasterio(rasterPath:os.path) -> tuple[np.array, dict]:
     rasterData = inRaster.read()
     print(f"raster data shape in ReadRaster : {rasterData.shape}")
     return rasterData, profile
+
+def read_tiff_advanced(file_path: str) -> Tuple[np.ndarray, str, str]:
+    try:
+        with rio.open(file_path) as dataset:
+            image_data = dataset.read()
+            file_extension = dataset.profile['driver']
+            crs = dataset.crs.to_string()
+        return image_data, file_extension, crs
+    except Exception as e:
+        print(f"The TIFF in the path {file_path} is corrupted.")
+        return None, None, None
 
 def createRaster(savePath:os.path, data:np.array, profile, noData:int = None):
     '''
@@ -416,7 +487,22 @@ def createRaster(savePath:os.path, data:np.array, profile, noData:int = None):
             new_dataset.write(data)
             print("Created new raster>>>")
     return savePath
-   
+
+def write_multilayer_tiff(file_path: str, data: List[np.ndarray], file_extension: str, crs: str) -> None:
+    profile = {
+        'driver': file_extension,
+        'dtype': 'float32',
+        'count': len(data),
+        'width': data[0].shape[1],
+        'height': data[0].shape[0],
+        'crs': crs,
+        'transform': rio.transform.from_origin(0, 0, 1, 1)
+    }
+    
+    with rio.open(file_path, 'w', **profile) as dst:
+        for i, layer in enumerate(data):
+            dst.write(layer.astype('float32'), i + 1)
+
 def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int = 1):
     if CustomTitle is not None:
         title = CustomTitle
@@ -487,13 +573,13 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     @HANDPath : Output path for the HAND.map result.
     
     '''
+    ### Prepare output file path. 
     path,communName,_ = get_parenPath_name_ext(DEMPath)
     lddPath =os.path.join(path,str(communName+'_ldd.map'))
     strahleOrdPath =os.path.join(path,str(communName+'_StrOrder.map'))
     subCatch =os.path.join(path,str(communName+'_subCatch.map'))
     DEMMap = saveTiffAsPCRaster(DEMPath)
     pcr.setclone(DEMMap)
-    print(DEMMap)
     DEM = pcr.readmap(DEMMap)
     aguila(DEM)
     ## Flow Direcction (Use to take long...)
@@ -502,26 +588,38 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
     if saveDDL: 
         pcr.report(FlowDir,lddPath)
+
+    # Compute river network
     print('#####......Computing Strahler order.......######')
     strahlerOrder = streamorder(FlowDir)
     strahlerRiver = ifthen(strahlerOrder>=threshold,strahlerOrder)
     if saveStrahOrder:
         pcr.report(strahlerRiver, strahleOrdPath)
+    
     print('#####......Finding outlets.......######')
     junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
     outlets = ordinal(cover(uniqueid(junctions),0))
+    
     print('#####......Calculating subcatchment.......######')
     subCatchments = catchment(FlowDir,outlets)
     if saveSubCath:
         pcr.report(subCatchments,subCatch)
+    
+    # Compute HAND
     print('#####......Computing HAND.......######')
     areaMin = areaminimum(DEM,subCatchments)
     HAND = DEM - areaMin
+    # Save HAND as *.map
     pcr.report(HAND,HANDPath)
-    print('#####......Ready to print.......######')
-    aguila(HAND)
-    aguila(subCatchments)
-    aguila(areaMin)
+    
+    ##### Print maps
+            ## Uncomment to show images of computed values. 
+    # print('#####......Ready to print.......######')
+    # aguila(HAND)
+    # aguila(subCatchments)
+    # aguila(areaMin)
+    
+    #Save HAND as *.tif
     handTifOut = replaceExtention(HANDPath,'.tif')
     translateRaster(HANDPath,handTifOut)
     return handTifOut
@@ -564,7 +662,7 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     strahlerOrder = streamorder(FlowDir)
     strahlerRiver = ifthen(strahlerOrder >=threshold,strahlerOrder)
     MainRiver = ifthen(strahlerOrder >= 10,strahlerOrder)
-    pcr.report(strahlerRiver,strahlerOrderPath)
+    # pcr.report(strahlerRiver,strahlerOrderPath)
     pcr.report(MainRiver,mainRiverPath)
     print('#####......Finding outlets.......######')
     junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
@@ -577,8 +675,8 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     massMap = pcr.spatial(pcr.scalar(1.0))
     flowAccumulation = accuflux(FlowDir, massMap)
     MaxFAccByCatchment = areamaximum(flowAccumulation,subCatchments)
-    # areaMin = areaminimum(DEM,subCatchments)    # Optional
-    # areaMax = areamaximum(DEM,subCatchments)    # Optional
+    areaMin = areaminimum(DEM,subCatchments)    # Optional
+    areaMax = areamaximum(DEM,subCatchments)    # Optional
     
     ## Saving subcatchment measures
     pcr.report(flowAccumulation,flowAccumulationPath)
@@ -587,7 +685,6 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     pcr.report(MaxFAccByCatchment,maxFAccByCatchmentPath)
     
     return True
-
 
 ######################
 ####   GDAL Tools  ###
@@ -673,19 +770,18 @@ class RasterGDAL():
         print(f"MetaData : {self.MetaData}")
 
 ###  GDAL independent functions
-def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> os.path:
+def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     mask_bbox = get_Shpfile_bbox(vectorMask)
     gdal.Warp(outPath, DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
     print(f"Successfully clipped at : {outPath}")
     return outPath
 
-def translateRaster(inPath, outpPath, formatTo:str = "GeoTiff") -> bool:
+def translateRaster(inPath, outpPath, formatTo:str = "GTiff") -> bool:
     """
     GDAL function to go translate rasters between different suported format. See ref. 
     Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
     """
-    gdal.Translate(outpPath,inPath,outputType=gdal.GDT_Float32,format=formatTo)
-    return True
+    return gdal.Translate(outpPath,inPath,outputType=gdal.GDT_Float32,format=formatTo)
 
 def saveTiffAsPCRaster(inputPath) -> str:
     outpPath = replaceExtention(inputPath,'.map')
@@ -694,6 +790,19 @@ def saveTiffAsPCRaster(inputPath) -> str:
 
 def readRasterAsArry(rasterPath):
    return gdal_array.LoadFile(rasterPath)
+
+def extractProjection(inPath):
+    '''
+    Extract the projection of the dataset with GDAL.GetProjection()
+    @inPath: path to the input file. Must be in one of the GDAL format. ex. 'GTiff'
+    @Return: projection file
+    '''
+    # Open the input TIFF file
+    dataset = gdal.Open(inPath)
+    # Get the input CRS
+    crs = dataset.GetProjection()
+    print(crs)
+    return crs
 
 def reproject_tif(tif_file, output_crs) -> str:
     """
@@ -706,22 +815,27 @@ def reproject_tif(tif_file, output_crs) -> str:
     Returns:
         str: Path to the reprojected TIFF file.
     """
+    # get input name and extention
+    _,inputNeme,ext = get_parenPath_name_ext(tif_file)
     # Open the input TIFF file
     dataset = gdal.Open(tif_file)
     # Get the input CRS
     input_crs = dataset.GetProjection()
+
     # Create a spatial reference object for the input CRS
     input_srs = osr.SpatialReference()
     input_srs.ImportFromWkt(input_crs)
+
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
-    output_file = os.path.splitext(tif_file)[0] + '_reproj.tif'
+    output_file_path = inputNeme + '_reproj' + ext
+    
     # Create the output dataset
-    gdal.Warp(output_file, dataset, dstSRS=output_srs, srcSRS=input_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999)
+    gdal.Warp(output_file_path, dataset, dstSRS=output_srs, srcSRS=input_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999)
     # Close the datasets
     del dataset
-    return output_file
+    return output_file_path
 
 def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     """
@@ -786,15 +900,15 @@ def get_Shpfile_bbox_str(file_path) -> str:
 def computeProximity(inRaster, value:int= 1, outPath: os.path = None) -> os.path:
     '''
     Compute the horizontal distance to features in the input raster.
-    @inRaster: A raster with features to mesure proximity from. 
+    @inRaster: A raster with features to mesure proximity from. A 0-1 valued raster,where the 1s are cells of the river network. 
     @outPath: Path to save the output raster. If None,the output is create in the same folder as the input with prefix: <_proximity.tif>.
-    @values: list of values to be considered as terget in the inRaster. Default [1]. 
+    @values: list of values to be considered as terget in the inRaster. Default [1].  
     '''
     if outPath is None:  
         path,communName,_ = get_parenPath_name_ext(inRaster)
         # Create output name
         outPath =os.path.join(path,str(communName+'_proximity.tif'))
-    ds = gdal.Open(inRaster, 0)
+    ds = gdal.Open(inRaster,GA_ReadOnly)
     band = ds.GetRasterBand(1)
     gt = ds.GetGeoTransform()
     sr = ds.GetProjection()
@@ -809,7 +923,7 @@ def computeProximity(inRaster, value:int= 1, outPath: os.path = None) -> os.path
     out_band = out_ds.GetRasterBand(1)
 
     # compute proximity
-    gdal.ComputeProximity(band, out_band, ['VALUES= {value}', 'DISTUNITS=PIXEL'])
+    gdal.ComputeProximity(band, out_band, [f'VALUES= {value}', 'DISTUNITS=PIXEL'])
     # delete input and output rasters
     del ds, out_ds
     return outPath

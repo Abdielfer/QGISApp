@@ -11,6 +11,9 @@ import pcraster as pcr
 from pcraster import *
 # from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance of the license are created, it can kill my license. Thank you!!
 
+from osgeo import gdal
+from osgeo.gdalconst import *
+
 def settingsForClipDEMAndHandComputing(maskVectorPath:os.path)-> Tuple:
     '''
     To be run after dc_extract. Make sure the dc_output directory contains only one file (The right one..)
@@ -44,7 +47,7 @@ def createShpList(parentDir)-> os.path:
     U.createCSVFromList(OutCSVPath,listOfPath)
     return OutCSVPath 
 
-def computeHANDfromBasinPoligon(cfg: DictConfig, csvListOfBasins:os.path):
+def computeHANDfromBasinPolygon(cfg: DictConfig, csvListOfBasins:os.path):
     '''
     #########################################################
     ##### Compute HAN in a serie of basins. #################
@@ -62,17 +65,73 @@ def computeHANDfromBasinPoligon(cfg: DictConfig, csvListOfBasins:os.path):
         print(f"HANDPath: {HANDPath}")
         U.computeHAND(clipPath,HANDPath)
 
+def computeProximityFromDEM(DEMPath)->os.path:
+    '''
+    Starting from a DEM, compute the main river network with PCRaster tools and then compte proximity raster with computeProximity() from GDAL. 
+    @demPath: Path to the DEM file in *.tif format
+    @return: Path to the computed proximity map. 
+    '''
+    # Set output path.
+    path,communName,_ = U.get_parenPath_name_ext(DEMPath)
+    lddOutPath = os.path.join(path,str(communName+'_ldd.map'))
+    mainRiverMapPath = os.path.join(path,str(communName+'_mainRiver.map'))
+    mainRiverTiffPath = os.path.join(path,str(communName+'_mainRiver.tif'))
+    # Extract input crs.\
+    input_crs = U.extractProjection(DEMPath)
+
+    # # Convert DEM to *.map
+    DEMMap = U.saveTiffAsPCRaster(DEMPath)
+    pcr.setclone(DEMMap)
+    DEM = pcr.readmap(DEMMap)
+    
+    # # Compute flow direction with D8. 
+    with U.timeit(): 
+         print('#####......Computing LDD .......######')
+         FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
+         pcr.report(FlowDir,lddOutPath)
+         print('#####......LDD Ready .......######')
+
+    #Compute river network
+    print('#####......Computing Strahler order.......######')
+    strahlerOrder = streamorder(lddOutPath)
+    MainRiver = ifthen(strahlerOrder >= 9,strahlerOrder)
+    pcr.report(MainRiver,mainRiverMapPath)
+    # Verify main river projection
+
+    mainRiver_crs = U.extractProjection(mainRiverMapPath)
+    if mainRiver_crs is None:
+        print('Yeaa is None')
+        U.reproject_tif(mainRiverMapPath,input_crs)
+
+    # Save mainRiver as Tif.
+    saved = U.translateRaster(mainRiverMapPath,mainRiverTiffPath)
+    print(f"Saved is --> {saved}")
+    
+    # Compute proximity
+    proximityPath = U.computeProximity(mainRiverTiffPath,value=[9,10,11,12,12,14])
+    return proximityPath
+
+
+
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     # chIn   # To check in the wbtools license
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
-    # bbox = U.get_Shpfile_bbox_str(r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\QC_Quebec\QC_Quebec_FullBasin.shp')
-    # print(bbox)
-    # U.dc_search(cfg)
-    # U.dc_describe(cfg)
-    # U.dc_extraction(cfg)
+    U.dc_extraction(cfg)
+    # tifFile = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_FullBasin_Clip.map'
+    # computeProximityFromDEM(tifFile)
     
+
+
+
+if __name__ == "__main__":
+    with U.timeit():
+        main()  
+
+
+#####   Block to write into main.py to performe automated tasks 
+
     ### Download, merging and resampling HRDTM tiles ###
     # WbWDir = cfg['output_dir']
     # WbTransf = U.generalRasterTools(WbWDir)
@@ -83,10 +142,3 @@ def main(cfg: DictConfig):
     
     # for csv in csvTilesList:
     #     WbTransf.mosaikAndResamplingFromCSV(csv,8,'Ftp_dtm')
-        
-
-if __name__ == "__main__":
-    with U.timeit():
-        main()  
-
-
