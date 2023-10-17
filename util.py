@@ -18,6 +18,8 @@ from torchgeo.datasets.utils import download_url
 from osgeo import gdal,ogr, osr
 from osgeo import gdal_array
 from osgeo.gdalconst import *
+gdal.UseExceptions()
+
 import pcraster as pcr
 from pcraster import *
 
@@ -386,59 +388,6 @@ def getNeighboursValues(raster)-> np.array:
 
     return neighbours
 
-@overload
-def getNeighboursValues(raster, shapefile) -> np.array:
-    """
-    This function takes a raster and a shapefile as input and returns an array with the same size of the input raster.
-    The inputs must be in the same reference system. The output array will contain at each cell a list of shape [1:8],
-    with the values of the 8 neighbours of the questioned pixel, starting from the left up corner. Consider only the pixels
-    that are not np.nan or noData value in any of the two input layers. If the questioned pixel is noData in any of the inputs
-    or np.nan, the list of neighbours values must be empty.
-    @raster: os.path to the raster to be inspect.
-    @shapefile: os.path to the shapefile to use as mask.
-    @return: array of lists. 
-    
-    """
-    
-    # Open raster file using Rasterio
-    with rio.open(raster) as src:
-        # Read raster data into a NumPy array
-        arr = src.read(1)
-        # Open shapefile using Rasterio
-        with rio.open(shapefile) as shp:
-            # Mask raster data using shapefile
-            mask = shp.dataset_mask()
-
-            # Create empty array to store neighbours
-            neighbours = np.empty_like(arr, dtype=object)
-
-            # Iterate over each cell in array
-            for i in range(arr.shape[0]):
-                for j in range(arr.shape[1]):
-                    # Get value of current cell
-                    val = arr[i, j]
-
-                    # Check if value is NaN or NoData in either input layer
-                    if np.isnan(val) or val == src.nodata or val == shp.nodata:
-                        neighbours[i, j] = []
-                    else:
-                        # Get indices of neighbouring cells
-                        indices = [(i-1, j-1), (i-1, j), (i-1, j+1),
-                                   (i, j-1),             (i, j+1),
-                                   (i+1, j-1), (i+1, j), (i+1, j+1)]
-
-                        # Get values of neighbouring cells that are not NaN or NoData in either input layer
-                        vals = [arr[x, y] for x, y in indices if 0 <= x < arr.shape[0] and 0 <= y < arr.shape[1]
-                                and not np.isnan(arr[x, y]) and arr[x, y] != src.nodata and arr[x, y] != shp.nodata]
-
-                        # Add values to neighbours array
-                        neighbours[i, j] = vals
-
-            # Apply mask to neighbours array
-            neighbours = np.ma.array(neighbours, mask=mask)
-
-    return neighbours.filled([])
-
 
 #######################
 ### Rasterio Tools  ###
@@ -804,19 +753,19 @@ def extractProjection(inPath):
     print(crs)
     return crs
 
-def reproject_tif(tif_file, output_crs) -> str:
+def reproject_PCRaster(tif_file, output_crs) -> str:
     """
-    Reprojects a TIFF file to the specified coordinate reference system (CRS).
-
+    Reprojects a PCraster file to the specified coordinate reference system (CRS).
     Args:
-        tif_file (str): Path to the input TIFF file.
+        map_file(str): Path to the input *.map file.
         output_crs (str): Output coordinate reference system (CRS) in the format 'EPSG:<code>'.
 
     Returns:
-        str: Path to the reprojected TIFF file.
+        str: Path to the reprojected *.map file.
+    NOTE: NOData value do not work. 
     """
     # get input name and extention
-    _,inputNeme,ext = get_parenPath_name_ext(tif_file)
+    parent,inputNeme,ext = get_parenPath_name_ext(tif_file)
     # Open the input TIFF file
     dataset = gdal.Open(tif_file)
     # Get the input CRS
@@ -829,10 +778,52 @@ def reproject_tif(tif_file, output_crs) -> str:
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
-    output_file_path = inputNeme + '_reproj' + ext
+    output_file_path = os.path.join(parent,inputNeme + '_reproj' + ext)
     
     # Create the output dataset
-    gdal.Warp(output_file_path, dataset, dstSRS=output_srs, srcSRS=input_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999)
+    '''
+    NO definas input dataset crs. 
+       srcSRS=input_srs, 
+    '''
+    gdal.Warp(output_file_path, dataset, dstSRS=output_srs, outputType=gdal.GDT_Float32, dstNodata=-9999, creationOptions=['PCRASTER_VALUESCALE=VS_SCALAR'])
+    # gdal.Warp(output_file_path, dataset, dstSRS=output_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999,outputType=gdal.GDT_Float32)
+    # Close the datasets
+    del dataset
+    return output_file_path
+
+
+def reproject_tif(tif_file, output_crs) -> str:
+    """
+    Reprojects a TIFF file to the specified coordinate reference system (CRS).
+    Args:
+        tif_file (str): Path to the input TIFF file.
+        output_crs (str): Output coordinate reference system (CRS) in the format 'EPSG:<code>'.
+
+    Returns:
+        str: Path to the reprojected TIFF file.
+    """
+    # get input name and extention
+    parent,inputNeme,ext = get_parenPath_name_ext(tif_file)
+    # Open the input TIFF file
+    dataset = gdal.Open(tif_file)
+    # Get the input CRS
+    input_crs = dataset.GetProjection()
+
+    # Create a spatial reference object for the input CRS
+    input_srs = osr.SpatialReference()
+    input_srs.ImportFromWkt(input_crs)
+
+    # Create a spatial reference object for the output CRS
+    output_srs = osr.SpatialReference()
+    output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
+    output_file_path = os.path.join(parent,inputNeme + '_reproj' + ext)
+    
+    # Create the output dataset
+    '''
+    NO definas input dataset crs. 
+       srcSRS=input_srs, 
+    '''
+    gdal.Warp(output_file_path, dataset, dstSRS=output_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999,outputType=gdal.GDT_Float32)
     # Close the datasets
     del dataset
     return output_file_path
@@ -923,10 +914,97 @@ def computeProximity(inRaster, value:int= 1, outPath: os.path = None) -> os.path
     out_band = out_ds.GetRasterBand(1)
 
     # compute proximity
-    gdal.ComputeProximity(band, out_band, [f'VALUES= {value}', 'DISTUNITS=PIXEL'])
+    gdal.ComputeProximity(band, out_band, [f'VALUES= {value}', 'DISTUNITS=GEO'])
     # delete input and output rasters
     del ds, out_ds
     return outPath
+
+def get_neighbors_GDAL(raster_file, shape_file):
+    """
+    This function takes a raster and a shapefile as input and returns an array containing
+    the values of the 8 neighbors of each pixel in the raster. The inputs must be in the
+    same reference system. The output array will have the same size of the input raster
+    and must contain at each cell a list of shape [1:8], with the values of the 8 neighbors
+    of the questioned pixel, starting from the left up corner. The function considers only
+    the pixels that are not np.nan or noData value in any of the two input layers. If the
+    questioned pixel is noData in any of the inputs or np.nan, the list of neighbors values
+    must be empty.
+                               Neighbourhood order
+                                #############
+                                ## 1  2  3 ##
+                                ## 4  X  5 ##
+                                ## 6  7  8 ##
+                                #############
+
+    @raster_file: path to raster file.
+    @shape_file: path to shapefile.
+    @return: array containing values of 8 neighbors for each pixel in raster
+    """
+    # Open raster file and get band, width, height, and transform information
+    dataset = gdal.Open(raster_file)
+    band = dataset.GetRasterBand(1)
+    width = dataset.RasterXSize
+    height = dataset.RasterYSize
+    transform = dataset.GetGeoTransform()
+
+    # Open shapefile and get layer information
+    shape = gdal.OpenEx(shape_file)
+    layer = shape.GetLayer()
+
+    # Create output array with same size as input raster
+    output_array = np.empty((height, width), dtype=object)
+
+    # Loop through each pixel in raster and get its neighbors' values
+    for y in range(height):
+        for x in range(width):
+            # Get value at current pixel location
+            value = band.ReadAsArray(x, y, 1, 1)[0][0]
+
+            # Check if current pixel is not np.nan or noData value in either input layer
+            if not np.isnan(value) and value != band.GetNoDataValue():
+                # Get coordinates for current pixel location
+                x_coord = transform[0] + (x * transform[1]) + (y * transform[2])
+                y_coord = transform[3] + (x * transform[4]) + (y * transform[5])
+
+                ## Create polygon for current pixel location
+                # This could be slow, but is less error-prone than rasterize polygons. 
+                ring = ogr.Geometry(ogr.wkbPolygon)
+                ring.AddPoint(x_coord, y_coord)
+                ring.AddPoint(x_coord + transform[1], y_coord)
+                ring.AddPoint(x_coord + transform[1], y_coord + transform[5])
+                ring.AddPoint(x_coord, y_coord + transform[5])
+                ring.AddPoint(x_coord, y_coord)
+                poly = ogr.Geometry(ogr.wkbPolygon)
+                poly.AddGeometry(ring)
+
+                # Loop through each feature in shapefile and check if it intersects with current pixel location polygon
+                neighbors = []
+                for feature in layer:
+                    if feature.GetGeometryRef().Intersects(poly):
+                        neighbor_value = feature.GetField("value")
+                        if not np.isnan(neighbor_value) and neighbor_value != band.GetNoDataValue():
+                             # Get indices of neighbouring cells
+                            indices = [(x_coord-transform[0], y_coord-transform[3]),        #1
+                                    (x_coord-transform[0], y_coord),                        #2
+                                    (x_coord-transform[0], y_coord+transform[3]),           #3
+                                    (x_coord, y_coord-transform[3]),                        #4
+                                    (x_coord, y_coord+transform[3]),                        #5
+                                    (x_coord+transform[0], y_coord-transform[3]),           #6
+                                    (x_coord+transform[0], y_coord),                        #7
+                                    (x_coord+transform[0], y_coord+transform[3])]           #8
+
+                            # Get values of neighbouring cells that are not NaN or NoData in either input layer
+                            vals = [band[x, y] for x, y in indices]
+                            # Add values to neighbours array
+                            neighbors[x_coord, y_coord] = vals
+                # Add list of neighbor values to output array at current pixel location
+                output_array[y,x] = neighbors
+
+            else:
+                # Add empty list to output array at current pixel location since current pixel is noData or np.nan
+                output_array[y,x] = []
+
+    return output_array
 
 
 ############################
