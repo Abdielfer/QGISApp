@@ -66,55 +66,45 @@ def computeHANDfromBasinPolygon(cfg: DictConfig, csvListOfBasins:os.path):
         print(f"HANDPath: {HANDPath}")
         U.computeHAND(clipPath,HANDPath)
 
-def computeProximityFromDEM(DEMPath)->os.path:
+def computeProximityFromDEMList(csvListOfDEMs)->os.path:
     '''
-    Starting from a DEM, compute the main river network with PCRaster tools and then compte proximity raster with computeProximity() from GDAL. 
+    Starting from a DEM" list, compute, for each raster in the list:
+        -  the main river network with PCRaster tools.
+        -  compte proximity raster with computeProximity() from GDAL. 
+    
     @demPath: Path to the DEM file in *.tif format
     @return: Path to the computed proximity map. 
     '''
-    # Set output path.
-    path,communName,_ = U.get_parenPath_name_ext(DEMPath)
-    lddOutPath = os.path.join(path,str(communName+'_ldd.map'))
-    mainRiverMapPath = os.path.join(path,str(communName+'_mainRiver.map'))
-    mainRiverTiffPath = os.path.join(path,str(communName+'_mainRiver.tif'))
-    
-    # Extract input crs.\
-    input_crs = U.extractProjection(DEMPath)
-   
-    # # Convert DEM to *.map
-    # DEMMap = U.saveTiffAsPCRaster(DEMPath)
-    # pcr.setclone(DEMMap)
-    DEM = pcr.readmap(DEMPath)
-    pcr.setclone(DEMPath)
-
-    # # Compute flow direction with D8. 
-    with U.timeit(): 
-         print('#####......Computing LDD .......######')
-         FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
-         pcr.report(FlowDir,lddOutPath)
-         print('#####......LDD Ready .......######')
-
-    #Compute river network
-    print('#####......Computing Strahler order.......######')
-    strahlerOrder = streamorder(lddOutPath)
-    MainRiver = ifthen(strahlerOrder >= 9,strahlerOrder)
-    pcr.report(MainRiver,mainRiverMapPath)
-    # Verify main river projection
-    mainRiver_crs = U.extractProjection(mainRiverMapPath)
-    print(f"mainRiverMap_crs : {mainRiver_crs}")
-    
-    if mainRiver_crs is None:
-        print('Yeaa is None')
-        U.reproject_tif(mainRiverMapPath,input_crs)
-
-    # Save mainRiver as Tif.
-    saved = U.translateRaster(mainRiverMapPath,mainRiverTiffPath)
-    print(f"Main River saved  --> {saved}")
-    
-    # Compute proximity
-    proximityPath = U.computeProximity(mainRiverTiffPath,value=[9,10,11,12,13,14])
-    return proximityPath
-
+    listOfPath = U.createListFromCSV(csvListOfDEMs)
+    for DEMPath in listOfPath:
+        print(f"Start processing --> {DEMPath}")
+        # Set output path.
+        path,communName,_ = U.get_parenPath_name_ext(DEMPath)
+        lddOutPath = os.path.join(path,str(communName+'_ldd.map'))
+        mainRiverMapPath = os.path.join(path,str(communName+'_mainRiver.map'))
+        mainRiverTiffPath = os.path.join(path,str(communName+'_mainRiver.tif'))
+        # Define Output crs;
+        output_crs = 'EPSG:3979'
+        ## Import raster *.map
+        DEM = pcr.readmap(DEMPath)
+        pcr.setclone(DEMPath)
+        #### Compute flow direction with D8. 
+        with U.timeit(): 
+            print('#####......Computing LDD .......######')
+            FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
+            pcr.report(FlowDir,lddOutPath)
+            U.reproject_PCRaster(lddOutPath)
+            print('#####......LDD Ready .......######')
+        mainRiverMapPath = U.extractHydroFeatures(DEMPath,lddOutPath)
+        ### Assigne projection of there is not defined
+        mainRiverMapPath_Reproj = U.assigneProjection(mainRiverMapPath,output_crs)
+        ### Save mainRiver as Tif.
+        saved = U.translateToTiff(mainRiverMapPath_Reproj,mainRiverTiffPath)
+        print(f"Main_River.tif saved  --> {saved}")
+        ##### Compute proximity
+        proximity = U.computeProximity(mainRiverTiffPath,value=[9,10,11,12,13,14])
+        print(f"Proximity created at --> {proximity}")
+        break
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
@@ -122,12 +112,11 @@ def main(cfg: DictConfig):
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
-    mapFile = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_FullBasin_Clip.map'
-    # computeProximityFromDEM(mapFile)
-    ToReproject = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\QC_Bromont_OK\QC_Bromont_EffectiveBasin_Clip.map'
-    U.reproject_PCRaster(ToReproject,'EPSG:3979')
     
-
+    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
+    computeProximityFromDEMList(csvList)
+    
+    
 if __name__ == "__main__":
     with U.timeit():
         main()  

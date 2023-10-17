@@ -239,7 +239,7 @@ def get_parenPath_name_ext(filePath):
          ex: parentPath[0] => '/src/goo/scripts/'; parentPath[1] => '/src/goo/', etc...
     '''
     parentPath = pathlib.PurePath(filePath).parent
-    name, ext = splitFilenameAndExtention(filePath)
+    name,ext = splitFilenameAndExtention(filePath)
     return parentPath, name, ext
   
 def addSubstringToName(path, subStr: str, destinyPath = None) -> os.path:
@@ -527,7 +527,7 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     lddPath =os.path.join(path,str(communName+'_ldd.map'))
     strahleOrdPath =os.path.join(path,str(communName+'_StrOrder.map'))
     subCatch =os.path.join(path,str(communName+'_subCatch.map'))
-    DEMMap = saveTiffAsPCRaster(DEMPath)
+    DEMMap = translateToPCRaster(DEMPath)
     pcr.setclone(DEMMap)
     DEM = pcr.readmap(DEMMap)
     aguila(DEM)
@@ -570,7 +570,7 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     
     #Save HAND as *.tif
     handTifOut = replaceExtention(HANDPath,'.tif')
-    translateRaster(HANDPath,handTifOut)
+    translateToTiff(HANDPath,handTifOut)
     return handTifOut
 
 def extractHydroFeatures(DEMPath,LDD) -> bool:
@@ -599,27 +599,34 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     areaMaxPath = os.path.join(path,str(communName+'_areaMax.map'))
     outletsPath = os.path.join(path,str(communName+'_Outlets.map'))
     flowAccumulationPath = os.path.join(path,str(communName+'_FlowAcc.map'))
-    maxFAccByCatchmentPath = os.path.join(path,str(communName+'_MaxFAcc.map'))
+    maxFAccByCatchmentPath = os.path.join(path,str(communName+'_MaxFAccByCatch.map'))
     strahlerOrderPath = os.path.join(path,str(communName+'_StrahOrder.map'))
     mainRiverPath = os.path.join(path,str(communName+'_mainRiverPath.map'))
     
     pcr.setclone(DEMPath)
     DEM = pcr.readmap(DEMPath)
     FlowDir = pcr.readmap(LDD)
-    print('#####......Computing Strahler order.......######')
+    print('#####......Computing Strahler order and Main River.......######')
     threshold = 8
     strahlerOrder = streamorder(FlowDir)
     strahlerRiver = ifthen(strahlerOrder >=threshold,strahlerOrder)
-    MainRiver = ifthen(strahlerOrder >= 10,strahlerOrder)
-    # pcr.report(strahlerRiver,strahlerOrderPath)
-    pcr.report(MainRiver,mainRiverPath)
+    MainRiver = ifthen(strahlerOrder >=9,strahlerOrder)
+    saveIt(strahlerRiver,strahlerOrderPath)
+    mainRiverPath_Reproj =  saveIt(MainRiver,mainRiverPath)
+    
     print('#####......Finding outlets.......######')
     junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
     outlets = ordinal(cover(uniqueid(junctions),0))
     pcr.report(outlets,outletsPath)
+    outletsPath_reproj = assigneProjection(outletsPath)
+    translateToTiff(outletsPath_reproj)
+
     print('#####......Calculating subcatchment.......######')
     subCatchments = catchment(FlowDir,outlets)
-    pcr.report(subCatchments,subCatchPath)
+    saveIt(subCatchments,subCatchPath)
+    subCatchPath_reproj = assigneProjection(subCatchPath)
+    translateToTiff(subCatchPath_reproj)
+    
     print('#####......Computing subcatchment measures.......######')
     massMap = pcr.spatial(pcr.scalar(1.0))
     flowAccumulation = accuflux(FlowDir, massMap)
@@ -628,13 +635,18 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     areaMax = areamaximum(DEM,subCatchments)    # Optional
     
     ## Saving subcatchment measures
-    pcr.report(flowAccumulation,flowAccumulationPath)
-    # pcr.report(areaMin,areaMinPath)    # Optional
-    # pcr.report(areaMax,areaMaxPath)    # Optional
-    pcr.report(MaxFAccByCatchment,maxFAccByCatchmentPath)
-    
-    return True
+    saveIt(flowAccumulation,flowAccumulationPath)
+    saveIt(areaMin,areaMinPath)    # Optional
+    saveIt(areaMax,areaMaxPath)    # Optional
+    saveIt(MaxFAccByCatchment,maxFAccByCatchmentPath)
+    del DEM
+    return mainRiverPath_Reproj
 
+def saveIt(dataset, path):
+        pcr.report(dataset,path)
+        path_Reproj = assigneProjection(path)
+        transalated = translateToTiff(path_Reproj)
+        return path_Reproj,transalated
 ######################
 ####   GDAL Tools  ###
 ######################
@@ -719,22 +731,26 @@ class RasterGDAL():
         print(f"MetaData : {self.MetaData}")
 
 ###  GDAL independent functions
+
 def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     mask_bbox = get_Shpfile_bbox(vectorMask)
     gdal.Warp(outPath, DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
     print(f"Successfully clipped at : {outPath}")
     return outPath
 
-def translateRaster(inPath, outpPath, formatTo:str = "GTiff") -> bool:
+def translateToTiff(inPath, formatTo:str = "GTiff") -> bool:
     """
     GDAL function to go translate rasters between different suported format. See ref. 
     Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
     """
-    return gdal.Translate(outpPath,inPath,outputType=gdal.GDT_Float32,format=formatTo)
+    outpPath = replaceExtention(inPath,'.tif')
+    options = gdal.TranslateOptions(format=formatTo, creationOptions=["COMPRESS=LZW"], noData=-9999)
+    return gdal.Translate(outpPath,inPath,options=options)
 
-def saveTiffAsPCRaster(inputPath) -> str:
+def translateToPCRaster(inputPath) -> str:
     outpPath = replaceExtention(inputPath,'.map')
-    gdal.Translate(outpPath,inputPath,format='PCRaster',outputType=gdal.GDT_Float32)
+    options = gdal.TranslateOptions(format='PCRaster', creationOptions=["COMPRESS=LZW"], noData=-9999)
+    gdal.Translate(outpPath,inputPath,outputType=gdal.GDT_Float32,options=options)
     return outpPath
 
 def readRasterAsArry(rasterPath):
@@ -753,7 +769,7 @@ def extractProjection(inPath):
     print(crs)
     return crs
 
-def reproject_PCRaster(tif_file, output_crs) -> str:
+def reproject_PCRaster(tif_file,output_crs:str='EPSG:3979') -> str:
     """
     Reprojects a PCraster file to the specified coordinate reference system (CRS).
     Args:
@@ -762,7 +778,7 @@ def reproject_PCRaster(tif_file, output_crs) -> str:
 
     Returns:
         str: Path to the reprojected *.map file.
-    NOTE: NOData value do not work. 
+    NOTE: NOData value do not works. 
     """
     # get input name and extention
     parent,inputNeme,ext = get_parenPath_name_ext(tif_file)
@@ -770,7 +786,6 @@ def reproject_PCRaster(tif_file, output_crs) -> str:
     dataset = gdal.Open(tif_file)
     # Get the input CRS
     input_crs = dataset.GetProjection()
-
     # Create a spatial reference object for the input CRS
     input_srs = osr.SpatialReference()
     input_srs.ImportFromWkt(input_crs)
@@ -778,7 +793,7 @@ def reproject_PCRaster(tif_file, output_crs) -> str:
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
-    output_file_path = os.path.join(parent,inputNeme + '_reproj' + ext)
+    output_file_path = os.path.join(parent,inputNeme + '_' + ext)
     
     # Create the output dataset
     '''
@@ -790,7 +805,6 @@ def reproject_PCRaster(tif_file, output_crs) -> str:
     # Close the datasets
     del dataset
     return output_file_path
-
 
 def reproject_tif(tif_file, output_crs) -> str:
     """
@@ -816,17 +830,35 @@ def reproject_tif(tif_file, output_crs) -> str:
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
-    output_file_path = os.path.join(parent,inputNeme + '_reproj' + ext)
+    output_file_path = os.path.join(parent,inputNeme + '_' + ext)
     
     # Create the output dataset
     '''
-    NO definas input dataset crs. 
+    Do not define input dataset crs. 
        srcSRS=input_srs, 
+    It works better. Do not know way..!!
     '''
     gdal.Warp(output_file_path, dataset, dstSRS=output_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999,outputType=gdal.GDT_Float32)
     # Close the datasets
     del dataset
     return output_file_path
+
+def assigneProjection(raster_file, output_crs:str='EPSG:3979') -> str:
+    '''
+    Assigne prejection <outpt_crs> to files in *.tif and *.map format IF they have no projection defined.
+    parameters:
+     @raster_file: os.path: Path to the raster to be reprojected.
+     @output_crs: <EPSG:####> projection.
+     @return: The path to the reprojected file.
+    '''
+    _,communName,ext = get_parenPath_name_ext(raster_file)
+    mainRiver_crs = extractProjection(raster_file)
+    if not mainRiver_crs:
+        print(f'Reprojecting..... {communName}{ext}')
+        if "map" in ext:
+            return reproject_PCRaster(raster_file,output_crs)
+        if 'tif' in ext:
+            return reproject_tif(raster_file,output_crs) 
 
 def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     """
@@ -888,7 +920,7 @@ def get_Shpfile_bbox_str(file_path) -> str:
     bboxStr = str(round(min_x, 2))+','+str(round(min_y,2))+','+str(round(max_x,2))+','+str(round(max_y,2))
     return bboxStr
 
-def computeProximity(inRaster, value:int= 1, outPath: os.path = None) -> os.path:
+def computeProximity(inRaster, value:int= 1, outPath:os.path = None) -> os.path:
     '''
     Compute the horizontal distance to features in the input raster.
     @inRaster: A raster with features to mesure proximity from. A 0-1 valued raster,where the 1s are cells of the river network. 
@@ -1005,7 +1037,6 @@ def get_neighbors_GDAL(raster_file, shape_file):
                 output_array[y,x] = []
 
     return output_array
-
 
 ############################
 #### Datacube_ Extract  ####
