@@ -607,12 +607,13 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     DEM = pcr.readmap(DEMPath)
     FlowDir = pcr.readmap(LDD)
     print('#####......Computing Strahler order and Main River.......######')
-    threshold = 8
+    threshold = 6
     strahlerOrder = streamorder(FlowDir)
     strahlerRiver = ifthen(strahlerOrder >=threshold,strahlerOrder)
     MainRiver = ifthen(strahlerOrder >=9,strahlerOrder)
     saveIt(strahlerRiver,strahlerOrderPath)
-    mainRiverPath_Reproj =  saveIt(MainRiver,mainRiverPath)
+    mainRiverPath_Reproj,mainRiverTif =  saveIt(MainRiver,mainRiverPath)
+    print(f"Main_River.tif saved  --> {mainRiverTif} \n")
     
     print('#####......Finding outlets.......######')
     junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
@@ -624,8 +625,6 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     print('#####......Calculating subcatchment.......######')
     subCatchments = catchment(FlowDir,outlets)
     saveIt(subCatchments,subCatchPath)
-    subCatchPath_reproj = assigneProjection(subCatchPath)
-    translateToTiff(subCatchPath_reproj)
     
     print('#####......Computing subcatchment measures.......######')
     massMap = pcr.spatial(pcr.scalar(1.0))
@@ -640,13 +639,15 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     saveIt(areaMax,areaMaxPath)    # Optional
     saveIt(MaxFAccByCatchment,maxFAccByCatchmentPath)
     del DEM
-    return mainRiverPath_Reproj
+    return mainRiverPath_Reproj,mainRiverTif
 
 def saveIt(dataset, path):
         pcr.report(dataset,path)
         path_Reproj = assigneProjection(path)
-        transalated = translateToTiff(path_Reproj)
-        return path_Reproj,transalated
+        translatedTIff = translateToTiff(path_Reproj)
+        removeFile(path)
+        return path_Reproj,translatedTIff
+
 ######################
 ####   GDAL Tools  ###
 ######################
@@ -731,6 +732,17 @@ class RasterGDAL():
         print(f"MetaData : {self.MetaData}")
 
 ###  GDAL independent functions
+def replace_no_data_value(dataset_path, new_value:float = -9999):
+    dataset = gdal.Open(dataset_path, gdal.GA_Update)
+    band = dataset.GetRasterBand(1)
+    old_value = band.GetNoDataValue()
+    for i in range(1, dataset.RasterCount + 1):
+        band = dataset.GetRasterBand(i)
+        band_array = band.ReadAsArray()
+        band_array[band_array == old_value] = new_value
+        band.WriteArray(band_array)
+        band.SetNoDataValue(new_value)
+    dataset.FlushCache()
 
 def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     mask_bbox = get_Shpfile_bbox(vectorMask)
@@ -738,19 +750,40 @@ def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     print(f"Successfully clipped at : {outPath}")
     return outPath
 
-def translateToTiff(inPath, formatTo:str = "GTiff") -> bool:
+def translateToTiff(inPath) -> bool:
     """
-    GDAL function to go translate rasters between different suported format. See ref. 
-    Ref: https://gdal.org/api/python/osgeo.gdal.html#osgeo.gdal.Translate
+    Write a *tif raster from an appropriate(GDAL accepted formats) raster input. The function return a raster with the same characteristic,
+      with NoDataValue seted to -9999.
+    @inPath: os.path: Path to the input raster
+    @Return: os.path: Path to the *.tif raster. 
+    
     """
-    outpPath = replaceExtention(inPath,'.tif')
-    options = gdal.TranslateOptions(format=formatTo, creationOptions=["COMPRESS=LZW"], noData=-9999)
-    return gdal.Translate(outpPath,inPath,options=options)
+     # Open the input raster
+    input_raster = gdal.Open(inPath)
+   
+    # Transform the dataset NoData value into -9999
+    input_band = input_raster.GetRasterBand(1)
+    input_band.SetNoDataValue(-9999)
+
+    # Create an empty raster file with the same CRS as the input raster
+    output_path = os.path.splitext(inPath)[0] + '.tif'
+    driver = gdal.GetDriverByName('GTiff')
+    output_raster = driver.CreateCopy(output_path, input_raster, 0)
+
+    # Write the dataset with the transformed NoData into the empty raster
+    output_band = output_raster.GetRasterBand(1)
+    output_band.WriteArray(input_band.ReadAsArray())
+
+    # Close the rasters
+    input_raster = None
+    output_raster = None
+
+    return output_path
 
 def translateToPCRaster(inputPath) -> str:
     outpPath = replaceExtention(inputPath,'.map')
-    options = gdal.TranslateOptions(format='PCRaster', creationOptions=["COMPRESS=LZW"], noData=-9999)
-    gdal.Translate(outpPath,inputPath,outputType=gdal.GDT_Float32,options=options)
+    options = gdal.TranslateOptions(format='PCRaster',noData=-9999) # creationOptions=["COMPRESS=LZW"]
+    gdal.Translate(outpPath,inputPath,options=options) #outputType=gdal.GDT_Float32
     return outpPath
 
 def readRasterAsArry(rasterPath):
@@ -784,12 +817,7 @@ def reproject_PCRaster(tif_file,output_crs:str='EPSG:3979') -> str:
     parent,inputNeme,ext = get_parenPath_name_ext(tif_file)
     # Open the input TIFF file
     dataset = gdal.Open(tif_file)
-    # Get the input CRS
-    input_crs = dataset.GetProjection()
-    # Create a spatial reference object for the input CRS
-    input_srs = osr.SpatialReference()
-    input_srs.ImportFromWkt(input_crs)
-
+    
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
@@ -806,12 +834,12 @@ def reproject_PCRaster(tif_file,output_crs:str='EPSG:3979') -> str:
     del dataset
     return output_file_path
 
-def reproject_tif(tif_file, output_crs) -> str:
+def reproject_tif(tif_file, output_crs:str='EPSG:3979') -> str:
     """
     Reprojects a TIFF file to the specified coordinate reference system (CRS).
     Args:
         tif_file (str): Path to the input TIFF file.
-        output_crs (str): Output coordinate reference system (CRS) in the format 'EPSG:<code>'.
+        output_crs (str): Output coordinate reference system (CRS) in the format 'EPSG:<code>'. Default <'EPSG:3979'>
 
     Returns:
         str: Path to the reprojected TIFF file.
@@ -819,14 +847,8 @@ def reproject_tif(tif_file, output_crs) -> str:
     # get input name and extention
     parent,inputNeme,ext = get_parenPath_name_ext(tif_file)
     # Open the input TIFF file
-    dataset = gdal.Open(tif_file)
-    # Get the input CRS
-    input_crs = dataset.GetProjection()
-
-    # Create a spatial reference object for the input CRS
-    input_srs = osr.SpatialReference()
-    input_srs.ImportFromWkt(input_crs)
-
+    replace_no_data_value(tif_file)
+    dataset = gdal.Open(tif_file,gdal.GA_Update)
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
@@ -838,7 +860,7 @@ def reproject_tif(tif_file, output_crs) -> str:
        srcSRS=input_srs, 
     It works better. Do not know way..!!
     '''
-    gdal.Warp(output_file_path, dataset, dstSRS=output_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999,outputType=gdal.GDT_Float32)
+    gdal.Warp(output_file_path, dataset, dstSRS=output_srs, resampleAlg=gdal.GRA_Bilinear, dstNodata=-9999)#outputType=gdal.GDT_Float32
     # Close the datasets
     del dataset
     return output_file_path

@@ -81,10 +81,6 @@ def computeProximityFromDEMList(csvListOfDEMs)->os.path:
         # Set output path.
         path,communName,_ = U.get_parenPath_name_ext(DEMPath)
         lddOutPath = os.path.join(path,str(communName+'_ldd.map'))
-        mainRiverMapPath = os.path.join(path,str(communName+'_mainRiver.map'))
-        mainRiverTiffPath = os.path.join(path,str(communName+'_mainRiver.tif'))
-        # Define Output crs;
-        output_crs = 'EPSG:3979'
         ## Import raster *.map
         DEM = pcr.readmap(DEMPath)
         pcr.setclone(DEMPath)
@@ -95,16 +91,11 @@ def computeProximityFromDEMList(csvListOfDEMs)->os.path:
             pcr.report(FlowDir,lddOutPath)
             U.reproject_PCRaster(lddOutPath)
             print('#####......LDD Ready .......######')
-        mainRiverMapPath = U.extractHydroFeatures(DEMPath,lddOutPath)
-        ### Assigne projection of there is not defined
-        mainRiverMapPath_Reproj = U.assigneProjection(mainRiverMapPath,output_crs)
-        ### Save mainRiver as Tif.
-        saved = U.translateToTiff(mainRiverMapPath_Reproj,mainRiverTiffPath)
-        print(f"Main_River.tif saved  --> {saved}")
+        _,mainRiverTiff = U.extractHydroFeatures(DEMPath,lddOutPath)
         ##### Compute proximity
-        proximity = U.computeProximity(mainRiverTiffPath,value=[9,10,11,12,13,14])
+        proximity = U.computeProximity(mainRiverTiff,value=[9,10,11,12,13,14])
         print(f"Proximity created at --> {proximity}")
-        break
+
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
@@ -113,9 +104,13 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     
-    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
-    computeProximityFromDEMList(csvList)
-    
+    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
+    # computeProximityFromDEMList(csvList)
+
+    ## Test Zone:
+    raster = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Kootenay_Creston_2017_ok\BC_Kootenay_Creston_EffectiveBasin_Clip_areaMax_.map'
+    U.convert_pcraster_to_tif(raster)
+
     
 if __name__ == "__main__":
     with U.timeit():
