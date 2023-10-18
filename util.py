@@ -625,7 +625,7 @@ def extractHydroFeatures(DEMPath) -> bool:
     array = pcraster.pcr2numpy(strahlerOrder, np.nan)
     # Get the maximum value
     max_value = np.nanmax(array)
-    limit = (max_value-3)
+    limit = int(max_value-3)
     print(f'Max Satrahler order = {max_value}. For main river considered {limit} to {max_value}')
     
     ## Extract Main river with the 3 las strahler orders
