@@ -573,12 +573,13 @@ def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,save
     translateToTiff(HANDPath,handTifOut)
     return handTifOut
 
-def extractHydroFeatures(DEMPath,LDD) -> bool:
+def extractHydroFeatures(DEMPath) -> bool:
     '''
     NOTE: Important to ensure the input DEM has a well defined NoData Value ex. -9999. 
     1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
     2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
     3- Read DEM in PCRasterformat
+
     4- Compute strahler Order-> streamorder(FlowDir)
     5- Compute main river -> streamorder >= 10
     6- Extract outlets: Defines as outlet all the intersections in the river network.
@@ -590,10 +591,11 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     @DEMPath : Input path to the DEM in *.tif format.
     @LDDPath : Input path to a precalculated LDD map through (pcr.lddcreation())
     @Return: <True> if the process is complete without error. Otherwhise, you'll receive an error from the PCRaster algorithm. 
-    
     '''
     path,communName,_ = get_parenPath_name_ext(DEMPath)
     # Create output names
+    slopePath = os.path.join(path,str(communName+'_slp.map'))
+    lddOutPath = os.path.join(path,str(communName+'_ldd.map'))
     subCatchPath =os.path.join(path,str(communName+'_subCatch.map'))
     areaMinPath = os.path.join(path,str(communName+'_areaMin.map'))
     areaMaxPath = os.path.join(path,str(communName+'_areaMax.map'))
@@ -605,49 +607,66 @@ def extractHydroFeatures(DEMPath,LDD) -> bool:
     
     pcr.setclone(DEMPath)
     DEM = pcr.readmap(DEMPath)
-    FlowDir = pcr.readmap(LDD)
+    print('#####......Computing Slope.......######')
+    slp = slope(DEM)
+    saveIt(slp,slopePath)
+    
+    print('#####......Computing LDD .......######')
+    with timeit(): 
+        FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
+    saveIt(FlowDir,lddOutPath)
+    print('#####......LDD Ready .......######')
+
     print('#####......Computing Strahler order and Main River.......######')
-    threshold = 6
+    threshold = 5
     strahlerOrder = streamorder(FlowDir)
     strahlerRiver = ifthen(strahlerOrder >=threshold,strahlerOrder)
-    MainRiver = ifthen(strahlerOrder >=9,strahlerOrder)
+    #####  Get Max strahler order
+    array = pcraster.pcr2numpy(strahlerOrder, np.nan)
+    # Get the maximum value
+    max_value = np.nanmax(array)
+    limit = (max_value-3)
+    print(f'Max Satrahler order = {max_value}. For main river considered {limit} to {max_value}')
+    
+    ## Extract Main river with the 3 las strahler orders
+    MainRiver = ifthen(strahlerOrder >= limit,strahlerOrder)
     saveIt(strahlerRiver,strahlerOrderPath)
-    mainRiverPath_Reproj,mainRiverTif =  saveIt(MainRiver,mainRiverPath)
+    _,mainRiverTif = saveIt(MainRiver,mainRiverPath)
     print(f"Main_River.tif saved  --> {mainRiverTif} \n")
     
     print('#####......Finding outlets.......######')
     junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
     outlets = ordinal(cover(uniqueid(junctions),0))
-    pcr.report(outlets,outletsPath)
-    outletsPath_reproj = assigneProjection(outletsPath)
-    translateToTiff(outletsPath_reproj)
+    # saveIt(outlets,outletsPath)
 
     print('#####......Calculating subcatchment.......######')
     subCatchments = catchment(FlowDir,outlets)
-    saveIt(subCatchments,subCatchPath)
+    # saveIt(subCatchments,subCatchPath)
     
     print('#####......Computing subcatchment measures.......######')
     massMap = pcr.spatial(pcr.scalar(1.0))
     flowAccumulation = accuflux(FlowDir, massMap)
     MaxFAccByCatchment = areamaximum(flowAccumulation,subCatchments)
-    areaMin = areaminimum(DEM,subCatchments)    # Optional
+    # areaMin = areaminimum(DEM,subCatchments)    # Optional
     areaMax = areamaximum(DEM,subCatchments)    # Optional
     
     ## Saving subcatchment measures
     saveIt(flowAccumulation,flowAccumulationPath)
-    saveIt(areaMin,areaMinPath)    # Optional
+    # saveIt(areaMin,areaMinPath)    # Optional
     saveIt(areaMax,areaMaxPath)    # Optional
     saveIt(MaxFAccByCatchment,maxFAccByCatchmentPath)
-    del DEM
-    return mainRiverPath_Reproj,mainRiverTif
+    del DEM,areaMax,massMap,flowAccumulation,MaxFAccByCatchment,subCatchments,outlets,junctions,MainRiver,strahlerRiver,strahlerOrder,FlowDir
+    return mainRiverTif
 
 def saveIt(dataset, path):
         pcr.report(dataset,path)
         path_Reproj = assigneProjection(path)
         translatedTIff = translateToTiff(path_Reproj)
-        removeFile(path)
-        return path_Reproj,translatedTIff
-
+        if path_Reproj and (path != path_Reproj):
+            removeFile(path)
+            return path_Reproj,translatedTIff
+        else:
+            return path,translatedTIff
 ######################
 ####   GDAL Tools  ###
 ######################
@@ -874,13 +893,14 @@ def assigneProjection(raster_file, output_crs:str='EPSG:3979') -> str:
      @return: The path to the reprojected file.
     '''
     _,communName,ext = get_parenPath_name_ext(raster_file)
-    mainRiver_crs = extractProjection(raster_file)
-    if not mainRiver_crs:
+    input_crs = extractProjection(raster_file)
+    if not input_crs:
         print(f'Reprojecting..... {communName}{ext}')
         if "map" in ext:
             return reproject_PCRaster(raster_file,output_crs)
         if 'tif' in ext:
             return reproject_tif(raster_file,output_crs) 
+
 
 def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     """

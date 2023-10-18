@@ -77,39 +77,26 @@ def computeProximityFromDEMList(csvListOfDEMs)->os.path:
     '''
     listOfPath = U.createListFromCSV(csvListOfDEMs)
     for DEMPath in listOfPath:
-        print(f"Start processing --> {DEMPath}")
-        # Set output path.
-        path,communName,_ = U.get_parenPath_name_ext(DEMPath)
-        lddOutPath = os.path.join(path,str(communName+'_ldd.map'))
-        ## Import raster *.map
-        DEM = pcr.readmap(DEMPath)
-        pcr.setclone(DEMPath)
-        #### Compute flow direction with D8. 
-        with U.timeit(): 
-            print('#####......Computing LDD .......######')
-            FlowDir = lddcreate(DEM,1e31,1e31,1e31,1e31)
-            pcr.report(FlowDir,lddOutPath)
-            U.reproject_PCRaster(lddOutPath)
-            print('#####......LDD Ready .......######')
-        _,mainRiverTiff = U.extractHydroFeatures(DEMPath,lddOutPath)
+        print(f"Start processing --> {DEMPath}")   
+        mainRiverTiff = U.extractHydroFeatures(DEMPath)
         ##### Compute proximity
-        proximity = U.computeProximity(mainRiverTiff,value=[9,10,11,12,13,14])
+        proximity = U.computeProximity(mainRiverTiff,value=[5,6,7,8,9,10,11,12,13,14])
         print(f"Proximity created at --> {proximity}")
-
+        print('########_____________________#########')
+        break
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     # chIn   # To check in the wbtools license
-    # nameByTime = U.makeNameByTime()
-    # logger(cfg,nameByTime)
+    nameByTime = U.makeNameByTime()
+    logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
-    
-    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
-    # computeProximityFromDEMList(csvList)
+    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
+    computeProximityFromDEMList(csvList)
 
-    ## Test Zone:
-    raster = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Kootenay_Creston_2017_ok\BC_Kootenay_Creston_EffectiveBasin_Clip_areaMax_.map'
-    U.convert_pcraster_to_tif(raster)
+    # ## Test Zone:
+    # raster = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Kootenay_Creston_2017_ok\BC_Kootenay_Creston_EffectiveBasin_Clip_areaMax_.map'
+    # U.convert_pcraster_to_tif(raster)
 
     
 if __name__ == "__main__":
