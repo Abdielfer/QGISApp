@@ -492,6 +492,18 @@ def computeRaterStats(rasterPath:os.path):
     rasMode = vals[index]
     return rasMin, rasMax, rasMean,rasMode, rasSTD, rasNoNaNCont
 
+def computeRaterMinMax(rasterPath:os.path):
+    '''
+    Read a reaste and return: 
+    @Return
+    @rasMin: Raster min.
+    @rasMax: Raster max.
+    '''
+    rasDataNan = replaceRastNoDataWithNan(rasterPath)
+    rasMin = np.nanmin(rasDataNan)
+    rasMax = np.nanmax(rasDataNan)
+    return rasMin, rasMax
+
 def computeRasterValuePercent(rasterPath, value:int=1)-> float:
     '''
     Compute the percent of pixels of value <value: default =1> in a raster. 
@@ -603,7 +615,8 @@ def extractHydroFeatures(DEMPath) -> bool:
     flowAccumulationPath = os.path.join(path,str(communName+'_FlowAcc.map'))
     maxFAccByCatchmentPath = os.path.join(path,str(communName+'_MaxFAccByCatch.map'))
     strahlerOrderPath = os.path.join(path,str(communName+'_StrahOrder.map'))
-    mainRiverPath = os.path.join(path,str(communName+'_mainRiverPath.map'))
+    mainRiverPath = os.path.join(path,str(communName+'_mainRiver_6Order.map'))
+    HANDPath = os.path.join(path,str(communName+'_HANDMainRiver_SO6.map')) 
     
     pcr.setclone(DEMPath)
     DEM = pcr.readmap(DEMPath)
@@ -625,7 +638,7 @@ def extractHydroFeatures(DEMPath) -> bool:
     array = pcraster.pcr2numpy(strahlerOrder, np.nan)
     # Get the maximum value
     max_value = np.nanmax(array)
-    limit = int(max_value-3)
+    limit = int(max_value-5) # MainRIver are the last <limit> numbers of Strahler Orders
     print(f'Max Satrahler order = {max_value}. For main river considered {limit} to {max_value}')
     
     ## Extract Main river with the 3 las strahler orders
@@ -635,9 +648,9 @@ def extractHydroFeatures(DEMPath) -> bool:
     print(f"Main_River.tif saved  --> {mainRiverTif} \n")
     
     print('#####......Finding outlets.......######')
-    junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerRiver, boolean(1))
+    junctions = ifthen(downstream(FlowDir,strahlerOrder) != strahlerOrder, boolean(1))
     outlets = ordinal(cover(uniqueid(junctions),0))
-    # saveIt(outlets,outletsPath)
+    saveIt(outlets,outletsPath)
 
     print('#####......Calculating subcatchment.......######')
     subCatchments = catchment(FlowDir,outlets)
@@ -647,9 +660,16 @@ def extractHydroFeatures(DEMPath) -> bool:
     massMap = pcr.spatial(pcr.scalar(1.0))
     flowAccumulation = accuflux(FlowDir, massMap)
     MaxFAccByCatchment = areamaximum(flowAccumulation,subCatchments)
-    # areaMin = areaminimum(DEM,subCatchments)    # Optional
+    areaMin = areaminimum(DEM,subCatchments)    # Optional
     areaMax = areamaximum(DEM,subCatchments)    # Optional
     
+    ## Compute HAND
+    print('#####......Computing HAND.......######')
+    HAND = DEM - areaMin
+    # Save HAND as *.map
+    saveIt(HAND,HANDPath)
+    
+    print('#####......Saving subcatchment measures.......######')
     ## Saving subcatchment measures
     saveIt(flowAccumulation,flowAccumulationPath)
     # saveIt(areaMin,areaMinPath)    # Optional
@@ -1137,7 +1157,7 @@ class WbT_dtmTransformer():
             wbt.set_working_dir(workingDir)
         print(f"Working dir at: {self.workingDir}")    
         
-    def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = False)-> os.path:
+    def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = True)-> os.path:
         '''
         Ref:   https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#filldepressions
         To ensure the quality of this process, this method execute several steep in sequence, following the Whitebox’s authors recommendation (For mor info see the above reference).
@@ -1185,11 +1205,12 @@ class WbT_dtmTransformer():
                 print("There was an error removing intermediate results : \n {error}")
         return output
 
-    def d8FPointerRasterCalculation(self, inFilledDTMName):
+    def d8_Pointer(self, inFilledDTMName):
         '''
+        Compute single flow direction based on the D* algorithm. Each cell is assigned with the direction pointing to the lowest neighbour.  
         @argument:
-         @inFilledDTMName: DTM without spurious point ar depression.  
-        @UOTPUT: D8_pioter: Raster tu use as input for flow direction and flow accumulation calculations. 
+         @inFilledDTMName: DTM without spurious points are depression.  
+        @UOTPUT: D8_pioter: Raster to use as input for flow direction and flow accumulation calculations. 
         '''
         output = addSubstringToName(inFilledDTMName,"_d8Pointer")
         wbt.d8_pointer(
@@ -1200,6 +1221,10 @@ class WbT_dtmTransformer():
             )
     
     def d8_flow_accumulation(self, inFilledDTMName):
+        '''
+        @DEM: Filled DEM raster.
+        @Output: d8_pointer raster
+        '''
         d8FAccOutputName = addSubstringToName(inFilledDTMName,"_d8fllowAcc" ) 
         wbt.d8_flow_accumulation(
             inFilledDTMName, 
@@ -1213,16 +1238,44 @@ class WbT_dtmTransformer():
             ) 
         return d8FAccOutputName
     
-    def jensePourPoint(self,inOutlest,d8FAccOutputName):
+    def extract_stream(FAcc,output, threshold:float = None)->os.path:
+        '''
+        "This tool can be used to extract, or map, the likely stream cells from an input flow-accumulation image "
+        ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/stream_network_analysis.html?highlight=stream%20network%20analyse#ExtractStreams
+        If the threshold is not providede, the value is compute as a percent (95% default) of the maximum flow accumulation value.
+        
+        @FAcc: Raster flow accumulation map.
+        @threshold: Nmber of cells or area to be consider to start and mantain a channel.
+        @output: Path to river network raster map 
+        '''
+        if not threshold:
+            _,rasterMax = computeRaterMinMax(FAcc)
+            threshold = int(rasterMax*0.954)
+        wbt.extract_streams(
+            FAcc, 
+            output, 
+            threshold, 
+            zero_background=False, 
+            callback=default_callback
+        )
+
+    def jensonPourPoints(self,inOutlest,streams):
+        '''
+        Replace the points in the @inOutlet to the nearest stream. 
+        @inOutlet: vector(point), Containig the point/s(outlet) to be replaced.
+        @streams: raster: River network to take as reference.
+        @output: Output vector file.
+        @snap_dist	Maximum snap distance in map units (default = 15.0). Distance as radius search area. 
+        '''
         jensenOutput = "correctedSnapPoints.shp"
         wbt.jenson_snap_pour_points(
             inOutlest, 
-            d8FAccOutputName, 
+            streams, 
             jensenOutput, 
             snap_dist = 15.0, 
             callback=default_callback
             )
-        print("jensePourPoint Done")
+        print("jensonPourPoints Done")
 
     def watershedConputing(self,d8Pointer, jensenOutput):  
         output = addSubstringToName(d8Pointer, "_watersheds")
@@ -1307,7 +1360,38 @@ class WbT_dtmTransformer():
             callback=default_callback
             )
         return output
+   
+    def computeStrahlerOrder(self,d8_pointer, streamRaster):
+        '''
+        @dem: Input raster DEM file. This function requires a filled DEM as input. 
+        @streams: Input raster streams file
+        @output: Output raster file
+        '''
+        output = addSubstringToName(streamRaster,'_StrahOrd')
+        wbt.strahler_stream_order(
+            d8_pointer, 
+            streamRaster, 
+            output, 
+            esri_pntr=False, 
+            zero_background=False, 
+            callback=default_callback
+        )
 
+    def WbT_HAND(self, dem, streams):
+        '''
+        This function requires a filled DEM as input. 
+        @DEM: raster: Filled DEM.
+        @stream: Input raster streams file
+        @Output: Output raster path file
+        '''
+        output = addSubstringToName(dem,'_WbT_HAND')
+        wbt.elevation_above_stream(
+            dem, 
+            streams, 
+            output,
+            callback=default_callback
+        )
+        
     def get_WorkingDir(self):
         return str(self.workingDir)
     

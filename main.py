@@ -77,13 +77,13 @@ def computeProximityFromDEMList(csvListOfDEMs)->os.path:
     '''
     listOfPath = U.createListFromCSV(csvListOfDEMs)
     for DEMPath in listOfPath:
-        print(f"Start processing --> {DEMPath}")   
-        mainRiverTiff = U.extractHydroFeatures(DEMPath)
-        ##### Compute proximity
-        proximity = U.computeProximity(mainRiverTiff,value=[5,6,7,8,9,10,11,12,13,14])
-        print(f"Proximity created at --> {proximity}")
-        print('########_____________________#########')
-        break
+        with U.timeit():
+            print(f"Start processing --> {DEMPath}")   
+            mainRiverTiff = U.extractHydroFeatures(DEMPath)
+            ##### Compute proximity
+            proximity = U.computeProximity(mainRiverTiff,value=[5,6,7,8,9,10,11,12,13,14])
+            print(f"Proximity created at --> {proximity}")
+            print('########_____________________#########')
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
@@ -91,13 +91,17 @@ def main(cfg: DictConfig):
     nameByTime = U.makeNameByTime()
     logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
-    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
-    computeProximityFromDEMList(csvList)
+    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
+    # computeProximityFromDEMList(csvList)
 
-    # ## Test Zone:
-    # raster = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Kootenay_Creston_2017_ok\BC_Kootenay_Creston_EffectiveBasin_Clip_areaMax_.map'
-    # U.convert_pcraster_to_tif(raster)
-
+    ## Test Zone:
+    DEM = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Kootenay_Creston_2017_ok\BC_Kootenay_Creston_EffectiveBasin_Clip.tif'
+    WbWDir = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\BC_Kootenay_Creston_2017_ok'
+    WbTransf = U.WbT_dtmTransformer(WbWDir)
+    WbTransf.fixNoDataAndfillDTM
+    WbTransf.WbT_HAND(DEM,stream)
+    d8_pointer = WbTransf.d8_Pointer(DEM)
+    WbTransf.computeStrahlerOrder(d8_pointer,stream)
     
 if __name__ == "__main__":
     with U.timeit():
