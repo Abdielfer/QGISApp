@@ -100,6 +100,8 @@ def DEMFeaturingForMLP_WbT(DEM):
     9- Compute distance to stream.
     10- Smapling(TODO)    
     '''
+    DEM_Features = U.WbT_DEM_FeatureExtraction(DEM)
+    
 
 
     return True  # I no error is encountered in the process, otherwhise, WbT error will apears. 

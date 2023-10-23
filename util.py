@@ -1151,13 +1151,16 @@ class WbT_DEM_FeatureExtraction():
     Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar derived  1m or < 2m. 
     '''
     def __init__(self,DEM,workingDir:str = None) -> None:
+        self.parentDir,_,_ = get_parenPath_name_ext(DEM)
         self.DEMName = DEM
         self.FilledDEM = addSubstringToName(DEM,'_fillWL')
-        if (workingDir is not None and os.path.isdir(workingDir)): # Creates output dir if it does not already exist 
+        if (workingDir and os.path.isdir(workingDir)): # Creates output dir if it does not already exist 
             self.workingDir = workingDir
             wbt.set_working_dir(workingDir)
+        else:
+            wbt.set_working_dir(self.parentDir)
         print(f"Working dir at: {self.workingDir}")    
-     
+
     def computeSlope(self):
         outSlope = addSubstringToName(self.FilledDEM,'_Slope')
         wbt.slope(self.DEMName,
@@ -1431,11 +1434,28 @@ class WbT_DEM_FeatureExtraction():
         )
         return output
 
+    def EcuclideanDistance(self)->os.path:
+        '''
+        "This tool will estimate the Euclidean distance (i.e. straight-line distance) between each grid cell and the nearest 'target cell' in the input image. TARGET cells are ALL NON-ZERO AND ALL NON-NODATA grid cells. Distance in the output image is measured in the same units as the horizontal units of the input image." 
+        ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/gis_analysis_distance_tools.html?highlight=euclid#euclideandistance
+        @input:	Input raster filePath
+        @output: Output raster filePath
+        '''
+        output = addSubstringToName(self.FilledDEM, '_EucDist')  ## This intend to be the equivalent of GDAL.proximity() functino.
+        wbt.euclidean_distance(
+            self.FilledDEM, 
+            output, 
+            callback=default_callback
+            )
+        return output
+
     def get_WorkingDir(self):
         return str(self.workingDir)
     
     def set_WorkingDir(self,NewWDir):
         wbt.set_working_dir(NewWDir)
+
+
 
 class generalRasterTools():
     def __init__(self, workingDir):
