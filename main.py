@@ -51,7 +51,7 @@ def createShpList(parentDir)-> os.path:
 def computeHANDfromBasinPolygon(cfg: DictConfig, csvListOfBasins:os.path):
     '''
     #########################################################
-    ##### Compute HAN in a serie of basins. #################
+    ##### Compute HAND in a serie of basins. #################
     ##### Bisins are provided as input path in a csv file. ##
     #########################################################
     '''
@@ -64,11 +64,11 @@ def computeHANDfromBasinPolygon(cfg: DictConfig, csvListOfBasins:os.path):
         clipPath, HANDPath = settingsForClipDEMAndHandComputing(f)
         print(f"ClipPath: {clipPath}")
         print(f"HANDPath: {HANDPath}")
-        U.computeHAND(clipPath,HANDPath)
+        U.computeHANDPCRaster(clipPath,HANDPath)
 
 def computeProximityFromDEMList(csvListOfDEMs)->os.path:
     '''
-    Starting from a DEM" list, compute, for each raster in the list:
+    Starting from a DEM" list, compute for each raster in the list:
         -  the main river network with PCRaster tools.
         -  compte proximity raster with computeProximity() from GDAL. 
     
@@ -84,6 +84,26 @@ def computeProximityFromDEMList(csvListOfDEMs)->os.path:
             proximity = U.computeProximity(mainRiverTiff,value=[5,6,7,8,9,10,11,12,13,14])
             print(f"Proximity created at --> {proximity}")
             print('########_____________________#########')
+
+def DEMFeaturingForMLP_WbT(DEM):
+    '''
+    The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools librery. 
+    The steps are (See function description formmore details.):
+    1- DEM correction <fixNoDataAndfillDTM()>
+    2- Slope <computeSlope()>
+    3- Compute flow direction <D8_pointe()>
+    4- Compute Flow accumulation <DInfFlowAcc()>
+    5- Extract stream.
+    6- Compute stream order with Strahler Order.
+    7- Compute HAND.
+    8- Compute HAND_euclidean
+    9- Compute distance to stream.
+    10- Smapling(TODO)    
+    '''
+
+
+    return True  # I no error is encountered in the process, otherwhise, WbT error will apears. 
+
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):

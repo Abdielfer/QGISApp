@@ -520,7 +520,7 @@ def computeRasterValuePercent(rasterPath, value:int=1)-> float:
 ####   PCRaster Tools  ####
 ###########################
 
-def computeHAND(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,saveSubCath:bool = False) -> os.path:
+def computeHANDPCRaster(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=True,saveSubCath:bool = False) -> os.path:
     '''
     NOTE: Important to ensure the input DEM has a well defined NoData Value ex. -9999. 
 
@@ -687,6 +687,7 @@ def saveIt(dataset, path):
             return path_Reproj,translatedTIff
         else:
             return path,translatedTIff
+
 ######################
 ####   GDAL Tools  ###
 ######################
@@ -921,7 +922,6 @@ def assigneProjection(raster_file, output_crs:str='EPSG:3979') -> str:
         if 'tif' in ext:
             return reproject_tif(raster_file,output_crs) 
 
-
 def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     """
     Crops a TIFF file using a shapefile as a mask.
@@ -1018,11 +1018,11 @@ def get_neighbors_GDAL(raster_file, shape_file):
     This function takes a raster and a shapefile as input and returns an array containing
     the values of the 8 neighbors of each pixel in the raster. The inputs must be in the
     same reference system. The output array will have the same size of the input raster
-    and must contain at each cell a list of shape [1:8], with the values of the 8 neighbors
+    and will contain at each cell a list of shape [1:8], with the values of the 8 neighbors
     of the questioned pixel, starting from the left up corner. The function considers only
     the pixels that are not np.nan or noData value in any of the two input layers. If the
     questioned pixel is noData in any of the inputs or np.nan, the list of neighbors values
-    must be empty.
+    will be empty.
                                Neighbourhood order
                                 #############
                                 ## 1  2  3 ##
@@ -1133,7 +1133,6 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
     out = instantiate(dict_DcExtract)
     return out
 
-    
 ######################################
 ####   WhiteBoxTools and  Rasterio ###
 ######################################
@@ -1146,18 +1145,39 @@ wbt.set_verbose_mode(True)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
     ## Pretraitment #
-class WbT_dtmTransformer():
+class WbT_DEM_FeatureExtraction():
     '''
      This class contain some functions to generate geomorphological and hydrological features from DEM.
     Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar derived  1m or < 2m. 
     '''
-    def __init__(self, workingDir:str = None) -> None:
+    def __init__(self,DEM,workingDir:str = None) -> None:
+        self.DEMName = DEM
+        self.FilledDEM = addSubstringToName(DEM,'_fillWL')
         if (workingDir is not None and os.path.isdir(workingDir)): # Creates output dir if it does not already exist 
             self.workingDir = workingDir
             wbt.set_working_dir(workingDir)
         print(f"Working dir at: {self.workingDir}")    
-        
-    def fixNoDataAndfillDTM(self, inDTMName, eraseIntermediateRasters = True)-> os.path:
+     
+    def computeSlope(self):
+        outSlope = addSubstringToName(self.FilledDEM,'_Slope')
+        wbt.slope(self.DEMName,
+                outSlope, 
+                zfactor=None, 
+                units="degrees", 
+                callback=default_callback
+                )
+        return outSlope
+    
+    def computeAspect(self):   
+        outAspect = addSubstringToName(self.FilledDEM,'_aspect')
+        wbt.aspect(self.DEMName, 
+                outAspect, 
+                zfactor=None, 
+                callback=default_callback
+                )
+        return outAspect
+    
+    def fixNoDataAndfillDTM(self,eraseIntermediateRasters = True)-> os.path:
         '''
         Ref:   https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#filldepressions
         To ensure the quality of this process, this method execute several steep in sequence, following the Whitebox’s authors recommendation (For mor info see the above reference).
@@ -1167,20 +1187,19 @@ class WbT_dtmTransformer():
         3-	Fill depressions.
         4-	Remove intermediary results to save storage space (Optionally you can keep it. See @Arguments).  
         @Argument: 
-        -inDTMName: Input DTM name
+        -self.DEMName: Input DEM name
         -eraseIntermediateRasters(default = True): Erase intermediate results to save storage space. 
         @Return: True if all process happened successfully, ERROR messages otherwise. 
-        @OUTPUT: DTM <filled_ inDTMName> Corrected DTM with wang_and_liu method. 
+        @OUTPUT: DEM <_fillWL> Corrected DEM with wang_and_liu method. 
         '''
-        dtmNoDataValueSetted = addSubstringToName(inDTMName,'_NoDataOK')
-        
+        dtmNoDataValueSetted = addSubstringToName(self.DEMName,'_NoDataOK')
         wbt.set_nodata_value(
-            inDTMName, 
+            self.DEMName, 
             dtmNoDataValueSetted, 
             back_value=0.0, 
             callback=default_callback
             )
-        dtmMissingDataFilled = addSubstringToName(inDTMName,'_MissingDataFilled')
+        dtmMissingDataFilled = addSubstringToName(self.DEMName,'_MissingDataFilled')
         wbt.fill_missing_data(
             dtmNoDataValueSetted, 
             dtmMissingDataFilled, 
@@ -1189,10 +1208,9 @@ class WbT_dtmTransformer():
             no_edges=True, 
             callback=default_callback
             )
-        output = addSubstringToName(inDTMName,"_filled_WangLiu")
         wbt.fill_depressions_wang_and_liu(
             dtmMissingDataFilled, 
-            output, 
+            self.FilledDEM, 
             fix_flats=True, 
             flat_increment=None, 
             callback=default_callback
@@ -1203,31 +1221,32 @@ class WbT_dtmTransformer():
                 os.remove(os.path.join(wbt.work_dir,dtmMissingDataFilled))
             except OSError as error:
                 print("There was an error removing intermediate results : \n {error}")
-        return output
+        return self.FilledDEM
 
-    def d8_Pointer(self, inFilledDTMName):
+    def d8_Pointer(self):
         '''
         Compute single flow direction based on the D* algorithm. Each cell is assigned with the direction pointing to the lowest neighbour.  
         @argument:
-         @inFilledDTMName: DTM without spurious points are depression.  
+         @inFilledDTMName: DEM without spurious points are depression.  
         @UOTPUT: D8_pioter: Raster to use as input for flow direction and flow accumulation calculations. 
         '''
-        output = addSubstringToName(inFilledDTMName,"_d8Pointer")
+        output = addSubstringToName(self.FilledDEM,"_d8Pointer")
         wbt.d8_pointer(
-            inFilledDTMName, 
+            self.FilledDEM, 
             output, 
             esri_pntr=False, 
             callback=default_callback
             )
+        return output
     
-    def d8_flow_accumulation(self, inFilledDTMName):
+    def d8_flow_accumulation(self):
         '''
         @DEM: Filled DEM raster.
-        @Output: d8_pointer raster
+        @Output: d8_flow Accumulation raster from a filled DEM.
         '''
-        d8FAccOutputName = addSubstringToName(inFilledDTMName,"_d8fllowAcc" ) 
+        d8FAccOutputName = addSubstringToName(self.FilledDEM,"_d8fllowAcc" ) 
         wbt.d8_flow_accumulation(
-            inFilledDTMName, 
+            self.FilledDEM, 
             d8FAccOutputName, 
             out_type="cells", 
             log=False, 
@@ -1238,27 +1257,6 @@ class WbT_dtmTransformer():
             ) 
         return d8FAccOutputName
     
-    def extract_stream(FAcc,output, threshold:float = None)->os.path:
-        '''
-        "This tool can be used to extract, or map, the likely stream cells from an input flow-accumulation image "
-        ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/stream_network_analysis.html?highlight=stream%20network%20analyse#ExtractStreams
-        If the threshold is not providede, the value is compute as a percent (95% default) of the maximum flow accumulation value.
-        
-        @FAcc: Raster flow accumulation map.
-        @threshold: Nmber of cells or area to be consider to start and mantain a channel.
-        @output: Path to river network raster map 
-        '''
-        if not threshold:
-            _,rasterMax = computeRaterMinMax(FAcc)
-            threshold = int(rasterMax*0.954)
-        wbt.extract_streams(
-            FAcc, 
-            output, 
-            threshold, 
-            zero_background=False, 
-            callback=default_callback
-        )
-
     def jensonPourPoints(self,inOutlest,streams):
         '''
         Replace the points in the @inOutlet to the nearest stream. 
@@ -1278,7 +1276,7 @@ class WbT_dtmTransformer():
         print("jensonPourPoints Done")
 
     def watershedConputing(self,d8Pointer, jensenOutput):  
-        output = addSubstringToName(d8Pointer, "_watersheds")
+        output = addSubstringToName(self.FilledDEM, "_watersheds")
         wbt.watershed(
             d8Pointer, 
             jensenOutput, 
@@ -1287,8 +1285,9 @@ class WbT_dtmTransformer():
             callback=default_callback
         )
         print("watershedConputing Done")
+        return output
 
-    def DInfFlowCalculation(self, inD8Pointer, log = False):
+    def DInfFlowAcc(self, inD8Pointer, log = False):
         ''' 
         Compute DInfinity flow accumulation algorithm.
         Ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#dinfflowaccumulation  
@@ -1300,7 +1299,7 @@ class WbT_dtmTransformer():
         @Output: 
             DInfFlowAcculation map. 
         '''
-        output = addSubstringToName(inD8Pointer,"_dInfFAcc")
+        output = addSubstringToName(self.FilledDEM,"_dInfFAcc")
         wbt.d_inf_flow_accumulation(
             inD8Pointer, 
             output, 
@@ -1312,25 +1311,6 @@ class WbT_dtmTransformer():
             callback=default_callback
             )
         return output
-
-    def computeSlope(self,inDTMName):
-        outSlope = addSubstringToName(inDTMName,'_Slope')
-        wbt.slope(inDTMName,
-                outSlope, 
-                zfactor=None, 
-                units="degrees", 
-                callback=default_callback
-                )
-        return outSlope
-    
-    def computeAspect(self,inDTMName):
-        outAspect = addSubstringToName(inDTMName,'_aspect')
-        wbt.aspect(inDTMName, 
-                outAspect, 
-                zfactor=None, 
-                callback=default_callback
-                )
-        return outAspect
 
     def computeRasterHistogram(self,inRaster):
         '''
@@ -1361,13 +1341,36 @@ class WbT_dtmTransformer():
             )
         return output
    
+    def extract_stream(FAcc,output, threshold:float = None)->os.path:
+        '''
+        "This tool can be used to extract, or map, the likely stream cells from an input flow-accumulation image "
+        ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/stream_network_analysis.html?highlight=stream%20network%20analyse#ExtractStreams
+        If the threshold is not provided, the value is compute as a percent (95% default) of the maximum flow accumulation value.
+        
+        @FAcc: Raster flow accumulation map.
+        @threshold: Nmber of cells or area to be consider to start and mantain a channel.
+        @output: Path to river network raster map 
+        '''
+        if not threshold:
+            _,rasterMax = computeRaterMinMax(FAcc)
+            threshold = int(rasterMax*0.954)
+        
+        wbt.extract_streams(
+            FAcc, 
+            output, 
+            threshold, 
+            zero_background=False, 
+            callback=default_callback
+        )
+        return output
+
     def computeStrahlerOrder(self,d8_pointer, streamRaster):
         '''
         @dem: Input raster DEM file. This function requires a filled DEM as input. 
         @streams: Input raster streams file
         @output: Output raster file
         '''
-        output = addSubstringToName(streamRaster,'_StrahOrd')
+        output = addSubstringToName(self.FilledDEM,'_StrahOrd')
         wbt.strahler_stream_order(
             d8_pointer, 
             streamRaster, 
@@ -1376,22 +1379,58 @@ class WbT_dtmTransformer():
             zero_background=False, 
             callback=default_callback
         )
+        return output
 
-    def WbT_HAND(self, dem, streams):
+    def WbT_HAND(self,streams):
         '''
         This function requires a filled DEM as input. 
         @DEM: raster: Filled DEM.
         @stream: Input raster streams file
         @Output: Output raster path file
         '''
-        output = addSubstringToName(dem,'_WbT_HAND')
+        output = addSubstringToName(self.FilledDEM,'_WbT_HAND')
         wbt.elevation_above_stream(
-            dem, 
+            self.FilledDEM, 
             streams, 
             output,
             callback=default_callback
         )
+        return output
         
+    def WbT_HAND_euclidean(self,streams):
+        '''
+        Compute the elevation as the euclidian distance from the river to each cell.
+        ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#elevationabovestreameuclidean
+        
+        This function requires a filled DEM as input. 
+        @DEM: raster: Filled DEM.
+        @stream: Input raster streams file
+        @Output: Output raster path file
+        '''
+        output = addSubstringToName(self.FilledDEM,'_WbT_HANDEuc')
+        wbt.elevation_above_stream_euclidean(
+            self.FilledDEM, 
+            streams, 
+            output,
+            callback=default_callback
+        )
+        return output
+
+    def wbT_geomorphons(self)->os.path:
+        output = addSubstringToName(self.FilledDEM, '_GMorph')
+        wbt.geomorphons(
+            self.FilledDEM, 
+            output, 
+            search=50, 
+            threshold=0.0, 
+            fdist=0, 
+            skip=0, 
+            forms=True, 
+            residuals=False, 
+            callback=default_callback
+        )
+        return output
+
     def get_WorkingDir(self):
         return str(self.workingDir)
     
@@ -1453,13 +1492,13 @@ class generalRasterTools():
         '''
         Just to make things easier, this function download from *csv with list of dtm_url,
          do mosaik and resampling at once. 
-        NOTE: If only one DTM is provided, mosaik is not applyed. 
+        NOTE: If only one DEM is provided, mosaik is not applyed. 
         Steps:
         1- create TransitFolder
         2- For *.csv in the nameList:
              - create destination Folder with csv name. 
-             - import DTM into TransitFolder
-             - mosaik DTM in TransitFoldes if more than one is downloaded.
+             - import DEM into TransitFolder
+             - mosaik DEM in TransitFoldes if more than one is downloaded.
              - resample mosaik to <outputResolution> argument
              - clear TransitFolder
         '''
@@ -1591,6 +1630,9 @@ class generalRasterTools():
     
     def get_WorkingDir(self):
         return str(self.workingDir)
+    
+    def setWBTWorkingDir(self, workingDir):
+        wbt.set_working_dir(workingDir)
 
 #WbW. TO SLOW: To be checked.  
 def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = False )->os.path:
