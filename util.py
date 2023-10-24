@@ -141,6 +141,20 @@ def listFreeFilesInDirByExt_fullPath(cwd:str, ext = '.csv') -> list:
                 file_list.append(os.path.join(root,f))
     return file_list
 
+def listFreeFilesInDirBySubstring_fullPath(cwd:str, substring = '') -> list:
+    '''
+    @substring: substring to be verify onto the file name. 
+    NOTE:  THIS function list only files that are directly into <cwd> path. 
+    '''
+    cwd = os.path.abspath(cwd)
+    # print(f"Current working directory: {cwd}")
+    file_list = []
+    for (root,_, file) in os.walk(cwd, followlinks=True):
+        for f in file:
+            if substring in f:
+                file_list.append(os.path.join(root,f))
+    return file_list
+
 def listALLFilesInDirByExt(cwd, ext = '.csv'):
     '''
     @ext = *.csv by default.
@@ -160,6 +174,18 @@ def listALLFilesInDirByExt_fullPath(cwd, ext = '.csv'):
     for (root, _, _) in os.walk(cwd):
         # print(f"Roots {root}")
         localList = listFreeFilesInDirByExt_fullPath(root, ext)
+        # print(f"Local List len :-->> {len(localList)}")
+        fullList.extend(localList) 
+    return fullList
+
+def listALLFilesInDirBySubstring_fullPath(cwd, ext = '.csv'):
+    '''
+    @substring: substring to be verify onto the file name.    NOTE:  THIS function list ALL files that are directly into <cwd> path and children folders. 
+    '''
+    fullList = []
+    for (root, _, _) in os.walk(cwd):
+        # print(f"Roots {root}")
+        localList = listFreeFilesInDirBySubstring_fullPath(root, ext)
         # print(f"Local List len :-->> {len(localList)}")
         fullList.extend(localList) 
     return fullList
@@ -287,6 +313,7 @@ def updateDict(dic:dict, args:dict)->dict:
             outDic[k]= args[k]
     return outDic
 
+
 ###################            
 ### General GIS ###
 ###################
@@ -388,6 +415,25 @@ def getNeighboursValues(raster)-> np.array:
 
     return neighbours
 
+def randomSamplingDEMStak(stak:list, rule:str='', sampNumber:int = 1000)-> pd.DataFrame:
+    '''
+    Receive as input a list of rasters and/or vectors and return a number of samples. The samples are extracted randomly, following some rules defined by the user.
+    Actions:
+    1- Compare all georeferences. Take the first projection in the stack as reference and ensure all other have the same.
+    2- create a list of all NoData values in the stack. 
+    3- chose random coordinates (x_coord,y_coord)
+    4- verify rule.
+    5- If the point is valid(NoNodata and Rule), add it to the datafame.
+    '''
+    raster1 = gdal.Open(stak[0])
+    raster1_projection= raster1.GetProjection()
+    print()
+    for i in range[1,stak.len()]:
+        raster = gdal.Open(stak[i], gdal.GA_Update)
+        rasterPrjection = raster.GetProjection()
+        if raster1_projection != rasterPrjection:
+            raster.SetProjection(raster1_projection)
+    return
 
 #######################
 ### Rasterio Tools  ###
@@ -466,10 +512,11 @@ def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int 
 def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> np.array:
     rasterData,profil = readRasterWithRasterio(rasterPath)
     NOData = profil['nodata']
+    print(f"NoData value in replace NOData with Nan is {NOData}")
     rasterDataNan = np.where(((rasterData == NOData)|(rasterData == extraNoDataVal)), np.nan, rasterData) 
     return rasterDataNan
 
-def computeRaterStats(rasterPath:os.path):
+def computeRasterStats(rasterPath:os.path):
     '''
     Read a reaste and return: 
     @Return
@@ -492,7 +539,7 @@ def computeRaterStats(rasterPath:os.path):
     rasMode = vals[index]
     return rasMin, rasMax, rasMean,rasMode, rasSTD, rasNoNaNCont
 
-def computeRaterMinMax(rasterPath:os.path):
+def computeRasterMinMax(rasterPath:os.path):
     '''
     Read a reaste and return: 
     @Return
@@ -502,7 +549,14 @@ def computeRaterMinMax(rasterPath:os.path):
     rasDataNan = replaceRastNoDataWithNan(rasterPath)
     rasMin = np.nanmin(rasDataNan)
     rasMax = np.nanmax(rasDataNan)
+    print(f"RAster min: {rasMin}, raster max {rasMin}")
     return rasMin, rasMax
+
+def computeRasterQuantiles(rasterPath, q:list=[0.25, 0.5, 0.945]):
+    rasDataNan = replaceRastNoDataWithNan(rasterPath)
+    # rasDataNan,_ = readRasterWithRasterio(rasterPath)
+    quantiles = np.nanquantile(rasDataNan, q)
+    return quantiles
 
 def computeRasterValuePercent(rasterPath, value:int=1)-> float:
     '''
@@ -638,7 +692,7 @@ def extractHydroFeatures(DEMPath) -> bool:
     array = pcraster.pcr2numpy(strahlerOrder, np.nan)
     # Get the maximum value
     max_value = np.nanmax(array)
-    limit = int(max_value-5) # MainRIver are the last <limit> numbers of Strahler Orders
+    limit = int(max_value-(threshold - 1)) # MainRIver are the last <limit> numbers of Strahler Orders
     print(f'Max Satrahler order = {max_value}. For main river considered {limit} to {max_value}')
     
     ## Extract Main river with the 3 las strahler orders
@@ -1138,10 +1192,11 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
 ######################################
 
 ## LocalPaths and global variables: to be adapted to your needs ##
-currentDirectory = os.getcwd()
+
 wbt = WhiteboxTools()
-wbt.set_working_dir(currentDirectory)
-wbt.set_verbose_mode(True)
+# currentDirectory = os.getcwd()
+# wbt.set_working_dir(currentDirectory)
+wbt.set_verbose_mode(False)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
     ## Pretraitment #
@@ -1150,16 +1205,12 @@ class WbT_DEM_FeatureExtraction():
      This class contain some functions to generate geomorphological and hydrological features from DEM.
     Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar derived  1m or < 2m. 
     '''
-    def __init__(self,DEM,workingDir:str = None) -> None:
+    def __init__(self,DEM) -> None:
         self.parentDir,_,_ = get_parenPath_name_ext(DEM)
         self.DEMName = DEM
         self.FilledDEM = addSubstringToName(DEM,'_fillWL')
-        if (workingDir and os.path.isdir(workingDir)): # Creates output dir if it does not already exist 
-            self.workingDir = workingDir
-            wbt.set_working_dir(workingDir)
-        else:
-            wbt.set_working_dir(self.parentDir)
-        print(f"Working dir at: {self.workingDir}")    
+        wbt.set_working_dir(self.parentDir)
+        print(f"Working dir at: {self.parentDir}")    
 
     def computeSlope(self):
         outSlope = addSubstringToName(self.FilledDEM,'_Slope')
@@ -1247,10 +1298,10 @@ class WbT_DEM_FeatureExtraction():
         @DEM: Filled DEM raster.
         @Output: d8_flow Accumulation raster from a filled DEM.
         '''
-        d8FAccOutputName = addSubstringToName(self.FilledDEM,"_d8fllowAcc" ) 
+        d8FAccOutput = addSubstringToName(self.FilledDEM,"_d8fllowAcc" ) 
         wbt.d8_flow_accumulation(
             self.FilledDEM, 
-            d8FAccOutputName, 
+            d8FAccOutput, 
             out_type="cells", 
             log=False, 
             clip=False, 
@@ -1258,7 +1309,7 @@ class WbT_DEM_FeatureExtraction():
             esri_pntr=False, 
             callback=default_callback
             ) 
-        return d8FAccOutputName
+        return d8FAccOutput
     
     def jensonPourPoints(self,inOutlest,streams):
         '''
@@ -1314,50 +1365,23 @@ class WbT_DEM_FeatureExtraction():
             callback=default_callback
             )
         return output
-
-    def computeRasterHistogram(self,inRaster):
-        '''
-        For details see Whitebox Tools references at:
-        https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html?#RasterHistogram
-        @return: An *.html file with the computed histogram. The file is autoloaded. 
-        '''
-        output = addSubstringToName(inRaster,'_histogram')
-        output = replaceExtention(output, '.html')
-        wbt.raster_histogram(
-            inRaster, 
-            output, 
-            callback=default_callback
-            )   
-        return output
-
-    def rasterCalculator(self, output, statement:str)-> os.path:
-        '''
-        For details see Whitebox Tools references at:
-        https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html#RasterCalculator
-        
-        @statement : string of desired opperation. Raster must be cuoted inside the statement str. ex "'raster1.tif' - 'rater2.tif'"
-        '''
-        wbt.raster_calculator(
-            output, 
-            statement, 
-            callback=default_callback
-            )
-        return output
    
-    def extract_stream(FAcc,output, threshold:float = None)->os.path:
+    def extract_stream(self,FAcc,threshold:float = None)->os.path:
         '''
         "This tool can be used to extract, or map, the likely stream cells from an input flow-accumulation image "
         ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/stream_network_analysis.html?highlight=stream%20network%20analyse#ExtractStreams
         If the threshold is not provided, the value is compute as a percent (95% default) of the maximum flow accumulation value.
         
         @FAcc: Raster flow accumulation map.
-        @threshold: Nmber of cells or area to be consider to start and mantain a channel.
+        @threshold: Number of cells or area to be consider to start and mantain a channel.
         @output: Path to river network raster map 
         '''
+        output = addSubstringToName(self.FilledDEM,'_stream')
         if not threshold:
-            _,rasterMax = computeRaterMinMax(FAcc)
-            threshold = int(rasterMax*0.954)
-        
+            Quant = computeRasterQuantiles(FAcc)
+            print(f" The FAcc quantiles are_______ {Quant}")
+            threshold = Quant[2] ### All values greater than the 75% of Flow Acc map. 
+            print(f" The FAcc threshold is_______ {threshold}")
         wbt.extract_streams(
             FAcc, 
             output, 
@@ -1369,9 +1393,11 @@ class WbT_DEM_FeatureExtraction():
 
     def computeStrahlerOrder(self,d8_pointer, streamRaster):
         '''
-        @dem: Input raster DEM file. This function requires a filled DEM as input. 
+        @Input: raster D8 pointer file
         @streams: Input raster streams file
-        @output: Output raster file
+            @esri_pntr	D8 pointer uses the ESRI style scheme
+            @zero_background	Flag indicating whether a background value of zero should be used
+        @output	Output raster file
         '''
         output = addSubstringToName(self.FilledDEM,'_StrahOrd')
         wbt.strahler_stream_order(
@@ -1383,6 +1409,27 @@ class WbT_DEM_FeatureExtraction():
             callback=default_callback
         )
         return output
+
+    def thresholdingStrahlerOrders(self, strahlerOrderRaster, maxStrahOrder:int=4) ->os.path:
+        '''
+        Extract the desired numer of strahler orders. 
+        @strahlerOrderRaster
+        @maxStrahOrder: Max numper of strahler order to be returned, starting from max and decresing.
+        @return: raster of the same type of StrahlerOrder, with values 0-1. 1- river cells, 0-no river cells.
+        ex. 
+            StrahlerOrder raster input has values 5,6,7,8,9,10,11,12. 
+            maxStrahOrder = 4, 
+            return raster with 1 in all cell with strahler orders [12,11,10,9], zero otherwhise.  
+        '''
+        _,max = computeRasterMinMax(strahlerOrderRaster)
+        threshold = int(max-maxStrahOrder) # MainRIver are the last <limit> numbers of Strahler Orders
+        print(f'Max Satrahler order = {max}. For main river considered {threshold} to {max}')
+        validStrahler_statement = str("'"+strahlerOrderRaster+"'"+'>='+str(threshold)) 
+        #####  Get Max strahler order
+        mainRiverPath = addSubstringToName(self.DEMName,'_mainRiver')
+        self.rasterCalculator(mainRiverPath,validStrahler_statement)
+        # Get the maximum value
+        return mainRiverPath
 
     def WbT_HAND(self,streams):
         '''
@@ -1420,6 +1467,29 @@ class WbT_DEM_FeatureExtraction():
         return output
 
     def wbT_geomorphons(self)->os.path:
+        '''
+        Compute geomorpohones according:
+        https://www.whiteboxgeo.com/manual/wbt_book/available_tools/geomorphometric_analysis.html?highlight=geomorphons#geomorphons
+        The output is a 10 classes geomorphons.
+        1	Flat
+        2	Peak (summit)
+        3	Ridge
+        4	Shoulder
+        5	Spur (convex)
+        6	Slope
+        7	Hollow (concave)
+        8	Footslope
+        9	Valley
+        10	Pit (depression)
+        @dem: Input raster DEM file
+        @output: Output raster file
+        @search: Look up distance (in cells)
+        @threshold:	Flatness threshold for the classification function (in degrees)
+        @fdist: Distance (in cells) to begin reducing the flatness @threshold: to avoid problems with pseudo-flat lines-of-sight
+        @skip: Distance (in cells) to begin calculating lines-of-sight. (Default 1 for a DEM of 16m x 16m cell size).
+        @forms:	Classify geomorphons into 10 common land morphologies, else output ternary pattern
+        @residuals:	Convert elevation to residuals of a linear model
+        '''
         output = addSubstringToName(self.FilledDEM, '_GMorph')
         wbt.geomorphons(
             self.FilledDEM, 
@@ -1427,35 +1497,62 @@ class WbT_DEM_FeatureExtraction():
             search=50, 
             threshold=0.0, 
             fdist=0, 
-            skip=0, 
+            skip=1, 
             forms=True, 
             residuals=False, 
             callback=default_callback
         )
         return output
 
-    def EcuclideanDistance(self)->os.path:
+    def euclideanDistance(self,objectiveRaster)->os.path:
         '''
         "This tool will estimate the Euclidean distance (i.e. straight-line distance) between each grid cell and the nearest 'target cell' in the input image. TARGET cells are ALL NON-ZERO AND ALL NON-NODATA grid cells. Distance in the output image is measured in the same units as the horizontal units of the input image." 
         ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/gis_analysis_distance_tools.html?highlight=euclid#euclideandistance
-        @input:	Input raster filePath
+        @objectiveRaster: Input raster with the 
         @output: Output raster filePath
         '''
-        output = addSubstringToName(self.FilledDEM, '_EucDist')  ## This intend to be the equivalent of GDAL.proximity() functino.
+        output = addSubstringToName(objectiveRaster, '_EucDist')  ## This intend to be the equivalent of GDAL.proximity() functino.
         wbt.euclidean_distance(
-            self.FilledDEM, 
+            objectiveRaster, 
             output, 
             callback=default_callback
             )
         return output
 
+    def computeRasterHistogram(self,inRaster):
+        '''
+        For details see Whitebox Tools references at:
+        https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html?#RasterHistogram
+        @return: An *.html file with the computed histogram. The file is autoloaded. 
+        '''
+        output = addSubstringToName(inRaster,'_histogram')
+        output = replaceExtention(output, '.html')
+        wbt.raster_histogram(
+            inRaster, 
+            output, 
+            callback=default_callback
+            )   
+        return output
+
+    def rasterCalculator(self, output, statement:str)-> os.path:
+        '''
+        For details see Whitebox Tools references at:
+        https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html#RasterCalculator
+        
+        @statement : string of desired opperation. Raster must be cuoted inside the statement str. ex "'raster1.tif' - 'rater2.tif'"
+        '''
+        wbt.raster_calculator(
+            output, 
+            statement, 
+            callback=default_callback
+            )
+        return output
+    
     def get_WorkingDir(self):
         return str(self.workingDir)
     
     def set_WorkingDir(self,NewWDir):
         wbt.set_working_dir(NewWDir)
-
-
 
 class generalRasterTools():
     def __init__(self, workingDir):
@@ -1666,9 +1763,6 @@ def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = 
     return outPath
 
 # Helpers
-def setWBTWorkingDir(workingDir):
-    wbt.set_working_dir(workingDir)
-
 def checkTifExtention(fileName):
     if ".tif" not in fileName:
         newFileName = input("enter a valid file name with the '.tif' extention")

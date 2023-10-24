@@ -87,7 +87,7 @@ def computeProximityFromDEMList(csvListOfDEMs)->os.path:
 
 def DEMFeaturingForMLP_WbT(DEM):
     '''
-    The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools librery. 
+    The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools library. All output adress are managed into the class WbT_DEM_FeatureExtraction(). Also the WbT_working directory is setted at the same parent dir of the input DEM. 
     The steps are (See function description formmore details.):
     1- DEM correction <fixNoDataAndfillDTM()>
     2- Slope <computeSlope()>
@@ -101,30 +101,34 @@ def DEMFeaturingForMLP_WbT(DEM):
     10- Smapling(TODO)    
     '''
     DEM_Features = U.WbT_DEM_FeatureExtraction(DEM)
-    
-
-
-    return True  # I no error is encountered in the process, otherwhise, WbT error will apears. 
+    DEM_Features.fixNoDataAndfillDTM()
+    U.replace_no_data_value(DEM_Features.FilledDEM)
+    DEM_Features.computeSlope()
+    D8Pointer = DEM_Features.d8_Pointer()  
+    FAcc = DEM_Features.d8_flow_accumulation()
+    stream = DEM_Features.extract_stream(FAcc)
+    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
+    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
+    DEM_Features.WbT_HAND(mainRiver)
+    DEM_Features.WbT_HAND_euclidean(mainRiver)
+    DEM_Features.wbT_geomorphons()
+    U.computeProximity(mainRiver)
+    return True  # True - If no error is encountered in the process, otherwhise, WbT error will apears. 
 
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     # chIn   # To check in the wbtools license
-    nameByTime = U.makeNameByTime()
-    logger(cfg,nameByTime)
+    # nameByTime = U.makeNameByTime()
+    # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
-    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mMAP.csv'
-    # computeProximityFromDEMList(csvList)
-
+    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mTif.csv'
     ## Test Zone:
-    DEM = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Kootenay_Creston_2017_ok\BC_Kootenay_Creston_EffectiveBasin_Clip.tif'
-    WbWDir = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\BC_Kootenay_Creston_2017_ok'
-    WbTransf = U.WbT_dtmTransformer(WbWDir)
-    WbTransf.fixNoDataAndfillDTM
-    WbTransf.WbT_HAND(DEM,stream)
-    d8_pointer = WbTransf.d8_Pointer(DEM)
-    WbTransf.computeStrahlerOrder(d8_pointer,stream)
-    
+    cwd = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI'
+    list = U.listALLFilesInDirBySubstring_fullPath(cwd,'HANDEuc.tif')
+    for i in list:
+        U.removeFile(i)
+
 if __name__ == "__main__":
     with U.timeit():
         main()  
@@ -142,3 +146,12 @@ if __name__ == "__main__":
     
     # for csv in csvTilesList:
     #     WbTransf.mosaikAndResamplingFromCSV(csv,8,'Ftp_dtm')
+
+#### Compute operation on alist of path from a csv
+# listOfPath = U.createListFromCSV(csvList)
+#     for DEMPath in listOfPath:
+#         if os.path.exists(DEMPath):
+#             with U.timeit():
+#                 DEMFeaturingForMLP_WbT(DEMPath)
+#         else:
+#             print(f"Is not dir-> {DEMPath}")
