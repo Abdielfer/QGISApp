@@ -190,11 +190,6 @@ def listALLFilesInDirBySubstring_fullPath(cwd, ext = '.csv'):
         fullList.extend(localList) 
     return fullList
 
-def isSubstringInText(subStr,text)->bool:
-    if subStr in text:
-        return True
-    return False
-
 def createListFromCSV(csv_file_location, delim:str =','):  
     '''
     @return: list from a <csv_file_location>.
@@ -1182,11 +1177,18 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
     if args is not None:
         dict_DcExtract = updateDict(dict_DcExtract,args)
     print(f"New dcExtract Dict:  {dict_DcExtract}")
-   
     ##  procede to extraction
     out = instantiate(dict_DcExtract)
     return out
 
+def multiple_dc_extract_ByPolygonBBox(cfg: DictConfig, csvPolygonList:os.path):
+    polygList = createListFromCSV(csvPolygonList)
+    for polyg in polygList:
+        _,name,_ = get_parenPath_name_ext(polyg)
+        bbox = get_Shpfile_bbox_str(polyg)
+        args = {"bbox":bbox,"suffix":name}
+        dc_extraction(cfg,args=args)
+    
 ######################################
 ####   WhiteBoxTools and  Rasterio ###
 ######################################
@@ -1490,9 +1492,9 @@ class WbT_DEM_FeatureExtraction():
         @forms:	Classify geomorphons into 10 common land morphologies, else output ternary pattern
         @residuals:	Convert elevation to residuals of a linear model
         '''
-        output = addSubstringToName(self.FilledDEM, '_GMorph')
+        output = addSubstringToName(self.DEMName, '_GMorph')
         wbt.geomorphons(
-            self.FilledDEM, 
+            self.DEMName, 
             output, 
             search=50, 
             threshold=0.0, 
@@ -1633,7 +1635,7 @@ class generalRasterTools():
         savedWDir = self.workingDir
         resamplerOutput = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
         resamplerOutput_CRS_OK = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
-        setWBTWorkingDir(transitFolderPath)
+        wbt.set_working_dir(transitFolderPath)
         
         ## recover all downloaded *.tif files path
         dtmTail = listFreeFilesInDirByExt(transitFolderPath, ext = '.tif')
@@ -1642,7 +1644,7 @@ class generalRasterTools():
         ## Merging tiles and resampling
         self.rasterResampler(dtmTail,resamplerOutput,outputResolution)
         self.set_CRS_GTIF(resamplerOutput, resamplerOutput_CRS_OK, crs)
-        setWBTWorkingDir(savedWDir)
+        wbt.set_working_dir(savedWDir)
         
         ## Celaning transit folder. 
         if clearTransitDir: 
@@ -1773,7 +1775,7 @@ def checkTifExtention(fileName):
 def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
     '''
     Import the tails in the url <tail_URL_NamesList>, 
-        to the local ydirectory defined in <localPath>.
+        to the local directory defined in <localPath>.
     '''
     confirmedLocalPath = ensureDirectory(localPath)
     for url in tail_URL_NamesList:

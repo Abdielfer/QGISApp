@@ -14,6 +14,11 @@ from pcraster import *
 from osgeo import gdal
 from osgeo.gdalconst import *
 
+def removeFilesBySubstring(parentPath,subStr:str=''):
+    list = U.listALLFilesInDirBySubstring_fullPath(parentPath,subStr)
+    for i in list:
+        U.removeFile(i)
+
 def settingsForClipDEMAndHandComputing(maskVectorPath:os.path)-> Tuple:
     '''
     To be run after dc_extract. Make sure the dc_output directory contains only one file (The right one..)
@@ -101,20 +106,32 @@ def DEMFeaturingForMLP_WbT(DEM):
     10- Smapling(TODO)    
     '''
     DEM_Features = U.WbT_DEM_FeatureExtraction(DEM)
-    DEM_Features.fixNoDataAndfillDTM()
-    U.replace_no_data_value(DEM_Features.FilledDEM)
-    DEM_Features.computeSlope()
-    D8Pointer = DEM_Features.d8_Pointer()  
-    FAcc = DEM_Features.d8_flow_accumulation()
-    stream = DEM_Features.extract_stream(FAcc)
-    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
-    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
-    DEM_Features.WbT_HAND(mainRiver)
-    DEM_Features.WbT_HAND_euclidean(mainRiver)
     DEM_Features.wbT_geomorphons()
-    U.computeProximity(mainRiver)
+    # DEM_Features.fixNoDataAndfillDTM()
+    # U.replace_no_data_value(DEM_Features.FilledDEM)
+    # DEM_Features.computeSlope()
+    # D8Pointer = DEM_Features.d8_Pointer()  
+    # FAcc = DEM_Features.d8_flow_accumulation()
+    # stream = DEM_Features.extract_stream(FAcc)
+    # strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
+    # mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
+    # DEM_Features.WbT_HAND(mainRiver)
+    # DEM_Features.WbT_HAND_euclidean(mainRiver)
+    # DEM_Features.wbT_geomorphons()
+    # U.computeProximity(mainRiver)
     return True  # True - If no error is encountered in the process, otherwhise, WbT error will apears. 
 
+def runFunctionInLoop(csvList, function):
+    '''
+    Given a list <csvList>, excecute the <function> in loop, with one element from the csv as argument at the time.  
+    '''
+    listOfPath = U.createListFromCSV(csvList)
+    for path in listOfPath:
+        if os.path.exists(path):
+            with U.timeit():
+                function(path)
+        else:
+            print(f"Path not found -> {path}")
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
@@ -122,12 +139,10 @@ def main(cfg: DictConfig):
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
-    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mTif.csv'
+    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mTif.csv'
     ## Test Zone:
-    cwd = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI'
-    list = U.listALLFilesInDirBySubstring_fullPath(cwd,'HANDEuc.tif')
-    for i in list:
-        U.removeFile(i)
+    runFunctionInLoop(csvList,DEMFeaturingForMLP_WbT)
+      
 
 if __name__ == "__main__":
     with U.timeit():
