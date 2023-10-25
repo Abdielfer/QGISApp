@@ -6,7 +6,7 @@
 dc_extrac_cog:
  _target_: dc_extract.extract_cog.extract_cog.extract_cog
  collections : 'cdsm:dem'
- bbox_crs: 'EPSG:3979' 
+ bbox_crs: 'EPSG:4326' 
  bbox: ''
 # dc_extract_cog's list of params:
 #  field_value : 1 # str, int, float
@@ -16,7 +16,7 @@ dc_extrac_cog:
  method: 'bilinear' #str 
 #  out_crs: 'EPSG:4326' #str
  out_dir: C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\
-suffix: '' # str
+ suffix: '' # str
 # datetime_filter: None # str
 # resolution_filter: None # str
 # overviews: False 

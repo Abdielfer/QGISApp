@@ -1002,7 +1002,7 @@ def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     driver = gdal.GetDriverByName('GTiff')
     # Create the output dataset
     output_dataset = driver.Create(outPath, cols,rows,count, gdal.GDT_Float32)
-    output_dataset.GetRasterBand(1).Fill(-99999)  # Important step to ensure DO NOT FILL the whole extention with valid values. 
+    output_dataset.GetRasterBand(1).Fill(-9999)  # Important step to ensure DO NOT FILL the whole extention with valid values. 
     # Set the geotransform and projection
     output_dataset.SetGeoTransform(dataset.GetGeoTransform())
     output_dataset.SetProjection(dataset.GetProjection())
@@ -1182,13 +1182,23 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
     return out
 
 def multiple_dc_extract_ByPolygonBBox(cfg: DictConfig, csvPolygonList:os.path):
+    '''
+    @cfg: DictConfig
+    @csvPolygonList
+    @Return: True if no error, otherwise dc_extraction tool errors report.
+    '''
     polygList = createListFromCSV(csvPolygonList)
     for polyg in polygList:
-        _,name,_ = get_parenPath_name_ext(polyg)
-        bbox = get_Shpfile_bbox_str(polyg)
-        args = {"bbox":bbox,"suffix":name}
-        dc_extraction(cfg,args=args)
-    
+        if os.path.exists(polyg):
+            print(f"Currently working on -> {polyg}")
+            _,name,_ = get_parenPath_name_ext(polyg)
+            bbox = get_Shpfile_bbox_str(polyg)
+            args = {"bbox":bbox,"suffix":name}
+            dc_extraction(cfg,args=args)
+        else:
+            print(f"Path not found in the ssytem -> {polyg}")
+    return True
+
 ######################################
 ####   WhiteBoxTools and  Rasterio ###
 ######################################

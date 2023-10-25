@@ -133,17 +133,35 @@ def runFunctionInLoop(csvList, function):
         else:
             print(f"Path not found -> {path}")
 
+def cropTifListWithMaskList(cfg: DictConfig, maskList:os.path):
+    wdir = cfg['output_dir']
+    maskList = U.createListFromCSV(maskList)
+    tifList = U.listFreeFilesInDirByExt_fullPath(wdir,'.tif')
+    for i in tifList:
+        _,tifName,_ = U.get_parenPath_name_ext(i)
+        for j in maskList:
+            _,maskName,_ =U.get_parenPath_name_ext(j)
+            if maskName in tifName:
+                outPath = os.path.join(wdir,maskName+'_clip.tif')
+                print('-----------------------Croping --------------------')
+                out = U.crop_tif(i,j,outPath)
+                print(f'{outPath}')
+                print('-----------------------Croped --------------------  \n')
+    
+
+    
+    
+    return True
+
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     # chIn   # To check in the wbtools license
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
-    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mTif.csv'
-    ## Test Zone:
-    runFunctionInLoop(csvList,DEMFeaturingForMLP_WbT)
-      
-
+    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsPolygonsShp.csv'
+    cropTifListWithMaskList(cfg,csvList)
+    
 if __name__ == "__main__":
     with U.timeit():
         main()  

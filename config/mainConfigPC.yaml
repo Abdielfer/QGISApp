@@ -10,4 +10,4 @@ config_override_dirname: ${hydra:job.override_dirname}
 config_path: ${hydra:runtime.config_sources}
 # projectRoot: C:\Users\abfernan\CrossCanFloodMapping\DL4Flood
 saveModelsPath: ${hydra:runtime.cwd} 
-output_dir : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\ # No need for last slash
+output_dir : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output  # No need for last slash
