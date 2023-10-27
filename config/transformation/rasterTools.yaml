@@ -2,14 +2,9 @@
 crop_tif:
  _target_ : util.clipRasterByMask
 #  DEMPath : None
- vectorMask : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp
+ vectorMask : C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\SK_Yorkton_OK\SK_Yorkton_FullBasin.shp
 #  outPath : None
 
-clip_raster_to_polygon:
- _target_ : util.clip_raster_to_polygon
-#  inputRaster : None 
- maskVector : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp
-#  outPath : None
 
 # # Add a shp file path to use as a mask for the raster extraction.
-mask: 'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data\BC_Quesnel.shp' # str. Optional defaults to None.
+mask: 'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\SK_Yorkton_OK\SK_Yorkton_FullBasin.shp' # str. Optional defaults to None.

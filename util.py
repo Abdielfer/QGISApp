@@ -410,26 +410,6 @@ def getNeighboursValues(raster)-> np.array:
 
     return neighbours
 
-def randomSamplingDEMStak(stak:list, rule:str='', sampNumber:int = 1000)-> pd.DataFrame:
-    '''
-    Receive as input a list of rasters and/or vectors and return a number of samples. The samples are extracted randomly, following some rules defined by the user.
-    Actions:
-    1- Compare all georeferences. Take the first projection in the stack as reference and ensure all other have the same.
-    2- create a list of all NoData values in the stack. 
-    3- chose random coordinates (x_coord,y_coord)
-    4- verify rule.
-    5- If the point is valid(NoNodata and Rule), add it to the datafame.
-    '''
-    raster1 = gdal.Open(stak[0])
-    raster1_projection= raster1.GetProjection()
-    print()
-    for i in range[1,stak.len()]:
-        raster = gdal.Open(stak[i], gdal.GA_Update)
-        rasterPrjection = raster.GetProjection()
-        if raster1_projection != rasterPrjection:
-            raster.SetProjection(raster1_projection)
-    return
-
 #######################
 ### Rasterio Tools  ###
 #######################
@@ -478,20 +458,27 @@ def createRaster(savePath:os.path, data:np.array, profile, noData:int = None):
             print("Created new raster>>>")
     return savePath
 
-def write_multilayer_tiff(file_path: str, data: List[np.ndarray], file_extension: str, crs: str) -> None:
-    profile = {
-        'driver': file_extension,
-        'dtype': 'float32',
-        'count': len(data),
-        'width': data[0].shape[1],
-        'height': data[0].shape[0],
-        'crs': crs,
-        'transform': rio.transform.from_origin(0, 0, 1, 1)
-    }
-    
-    with rio.open(file_path, 'w', **profile) as dst:
-        for i, layer in enumerate(data):
-            dst.write(layer.astype('float32'), i + 1)
+def stack_rasters(input_paths, output_path):
+    src_files_to_mosaic = []
+    i = 0
+    for path in input_paths:
+        print(f'band {i} : {path}')
+        i+=1
+        src = rio.open(path)
+        src_files_to_mosaic.append(src)
+
+    mosaic, out_trans = rio.merge.merge(src_files_to_mosaic)
+    out_meta = src.meta.copy()
+    out_meta.update({"driver": "GTiff",
+                     "count": len(src_files_to_mosaic),
+                     "height": mosaic.shape[1],
+                     "width": mosaic.shape[2],
+                     "transform": out_trans})
+
+    with rio.open(output_path, "w", **out_meta) as dest:
+        for i, file in enumerate(src_files_to_mosaic):
+            dest.write(file.read(1), i+1)
+            print(f' i in enumerate : -> {i}')
 
 def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int = 1):
     if CustomTitle is not None:
@@ -510,6 +497,15 @@ def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> 
     print(f"NoData value in replace NOData with Nan is {NOData}")
     rasterDataNan = np.where(((rasterData == NOData)|(rasterData == extraNoDataVal)), np.nan, rasterData) 
     return rasterDataNan
+
+def updateNoDataValue_Rio(input_path, output_path, nodata_value):
+    with rio.open(input_path) as src:
+        profile = src.profile
+        profile.update(nodata=nodata_value)
+        with rio.open(output_path, 'w', **profile) as dst:
+            for i in range(1, src.count + 1):
+                data = src.read(i)
+                dst.write(data, i)
 
 def computeRasterStats(rasterPath:os.path):
     '''
@@ -564,6 +560,73 @@ def computeRasterValuePercent(rasterPath, value:int=1)-> float:
     rasNoNaNCont = np.count_nonzero(rasDataNan != np.nan)
     valuCont = np.count_nonzero(rasDataNan == value)
     return (valuCont/rasNoNaNCont)*100
+
+def normalize_raster(inputRaster):
+    outputRaster = addSubstringToName(inputRaster, '_norm')
+    with rio.open(inputRaster) as src:
+        profile = src.profile
+        with rio.open(outputRaster, 'w', **profile) as dst:
+            for i in range(1, src.count + 1):
+                data = src.read(i)
+                normalized_data = (data - data.min()) / (data.max() - data.min())
+                dst.write(normalized_data, i)
+    return outputRaster
+
+
+def randomSamplingMultiBandRaster(rasterIn, ratio:float=1)-> np.array:
+    '''
+    
+    
+    
+    '''
+    sampleCont =0    
+    arrayDataset = []
+    with rio.open(rasterIn) as src:
+        # Read data from bands into an array
+        data = src.read()
+        NoData = src.profile['nodata']
+        W,H = src.width,src.height
+        totalSamples = int((W*H)*ratio)
+        print(f'Number of samples to take {totalSamples}')
+        arrayDataset = np.zeros((totalSamples,(src.count+2)))
+        while sampleCont<totalSamples:
+            # Generate random index within the raster limits
+            i = np.random.randint(0,H)
+            j = np.random.randint(0,W)
+            ## extract corrdinates at index (i,j)
+            xy = np.array(src.xy(i,j))
+            ## Extract banda values as vector
+            bandsArray = data[:, i, j]
+            # Check if neither value is NoData OR NaN in the first band (DEM)
+            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN):
+                # Add the sample to the dataset
+                arrayDataset[sampleCont] = np.concatenate((xy, bandsArray))
+                sampleCont+=1    
+    return arrayDataset
+
+def get_field_value(labels, field_name, x_coord,y_coord):
+    '''
+    This code reads in a vector map using rasterio.
+    Then uses geometry_mask to find all features that intersect with the given coordinate pair. 
+    It then extracts the value of the specified field for each intersecting feature and returns the first value if there is at 
+    least one intersecting feature.
+    '''
+    with rio.open(labels) as src:
+        # Get the geometry of the point
+        point_geom = {'type': 'Point', 'coordinates': (x_coord, y_coord)}
+        # Get the features that intersect with the point
+        features = rio.features.geometry_mask([point_geom],
+                                                    out_shape=src.shape,
+                                                    transform=src.transform,
+                                                    invert=True)
+        # Get the values of the specified field for each intersecting feature
+        values = [f[field_name] for f, v in zip(src.sample(), features) if v]
+        # Return the first value if there is at least one intersecting feature
+        if values:
+            return values[0]
+        else:
+            return 0
+        
 
 ###########################
 ####   PCRaster Tools  ####
@@ -820,12 +883,13 @@ class RasterGDAL():
         print(f"projection : {self.projection}")
         print(f"MetaData : {self.MetaData}")
 
-###  GDAL independent functions
+
 def replace_no_data_value(dataset_path, new_value:float = -9999):
     dataset = gdal.Open(dataset_path, gdal.GA_Update)
-    band = dataset.GetRasterBand(1)
-    old_value = band.GetNoDataValue()
     for i in range(1, dataset.RasterCount + 1):
+        band = dataset.GetRasterBand(i)
+        old_value = band.GetNoDataValue()
+        print(f'Band({i}), NoData Value -> {old_value}')
         band = dataset.GetRasterBand(i)
         band_array = band.ReadAsArray()
         band_array[band_array == old_value] = new_value
@@ -1002,7 +1066,7 @@ def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     driver = gdal.GetDriverByName('GTiff')
     # Create the output dataset
     output_dataset = driver.Create(outPath, cols,rows,count, gdal.GDT_Float32)
-    output_dataset.GetRasterBand(1).Fill(-9999)  # Important step to ensure DO NOT FILL the whole extention with valid values. 
+    output_dataset.GetRasterBand(1).SetNoDataValue(-9999)  # Important step to ensure DO NOT FILL the whole extention with valid values. 
     # Set the geotransform and projection
     output_dataset.SetGeoTransform(dataset.GetGeoTransform())
     output_dataset.SetProjection(dataset.GetProjection())
@@ -1149,6 +1213,174 @@ def get_neighbors_GDAL(raster_file, shape_file):
 
     return output_array
 
+def sampling_Full_rasters(raster1_path, raster2_path) -> np.array:
+    '''
+    This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value  raster one, Z_value raster two]. 
+    The first input raster is used as a reference. 
+    The two rasters are assumed to be in the same CRS but not necessarily with the same resolution. 
+    The algorithm samples the centre of all pixels using the upper-left corner of the first raster as a reference.
+    When you read a raster with GDAL, the raster transformation is represented by a <geotransform>. The geotransform is a six-element tuple that describes the relationship between pixel coordinates and georeferenced coordinates ⁴. The elements of the geotransform are as follows:
+    
+    RASTER Transformation content 
+    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
+    0. x-coordinate of the upper-left corner of the raster
+    1. width of a pixel in the x-direction
+    2. rotation, which is zero for north-up images
+    3. y-coordinate of the upper-left corner of the raster
+    4. rotation, which is zero for north-up images
+    5. height of a pixel in the y-direction (usually negative)
+
+    The geotransform to convert between pixel coordinates and georeferenced coordinates using the following equations:
+
+    x_geo = geotransform[0] + x_pixel * geotransform[1] + y_line * geotransform[2]
+    y_geo = geotransform[3] + x_pixel * geotransform[4] + y_line * geotransform[5]
+
+    `x_pixel` and `y_line` : pixel coordinates of a point in the raster, 
+    `x_geo` and `y_geo` : corresponding georeferenced coordinates.
+
+    In addition, to extract the value in the centre of the pixels, we add 1/2 of width and height respectively.
+    x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+    y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
+
+    '''
+    # Open the first raster and get its metadata
+    raster1 = gdal.Open(raster1_path)
+    raster1_transform = raster1.GetGeoTransform()
+    print(f"raster1_transform : {raster1_transform}")
+    raster1_band = raster1.GetRasterBand(1)
+    raster1_noDataValue = raster1_band.GetNoDataValue()
+
+    # Open the second raster and get its metadata
+    raster2 = gdal.Open(raster2_path)
+    raster2_transform = raster2.GetGeoTransform()
+    raster2_band = raster2.GetRasterBand(1)
+    raster2_noDataValue = raster2_band.GetNoDataValue()
+
+    # Get the size of the rasters
+    x_size = raster1.RasterXSize
+    y_size = raster1.RasterYSize
+
+    # Create an array to store the sampled points
+    sampled_points = np.zeros((x_size * y_size, 4))
+
+    # Loop through each pixel in the first raster
+    
+    for i in range(x_size):
+        for j in range(y_size):
+            # Get the coordinates of the pixel in the first raster
+            x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+            y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2 
+
+            # Get the value of the pixel in the first and second rasters
+            value_raster1 = raster1_band.ReadAsArray(i, j, 1, 1)[0][0]
+            value_raster2 = raster2_band.ReadAsArray(i, j, 1, 1)[0][0]
+
+            # Add the sampled point to the array
+            if (value_raster1!= raster1_noDataValue and value_raster1 != np.NaN 
+                and value_raster2 != raster2_noDataValue and value_raster2 != np.NaN):
+                sampled_points[i * y_size + j] = [x_coord, y_coord, value_raster1, value_raster2]
+
+    print(f'One sample: {sampled_points[2:]}')
+    return sampled_points
+    
+def randomSampling_rasters(raster1_path, raster2_path, num_samples) -> np.array:
+    '''
+    This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value rather one, Z_value rather two]. 
+    The first input raster is used as a reference. 
+    The two rasters are assumed to be in the same CRS but not necessarily with the same resolution. 
+    The algorithm samples the centre of all pixels using the upper-left corner of the first raster as a reference.
+    When you read a raster with GDAL, the raster transformation is represented by a <geotransform>. The geotransform is a six-element tuple that describes the relationship between pixel coordinates and georeferenced coordinates ⁴. The elements of the geotransform are as follows:
+    
+    RASTER Transformation content 
+    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
+    0. x-coordinate of the upper-left corner of the raster
+    1. width of a pixel in the x-direction
+    2. rotation, which is zero for north-up images
+    3. y-coordinate of the upper-left corner of the raster
+    4. rotation, which is zero for north-up images
+    5. height of a pixel in the y-direction (usually negative)
+
+    The geotransform to convert between pixel coordinates and georeferenced coordinates using the following equations:
+
+    x_geo = geotransform[0] + x_pixel * geotransform[1] + y_line * geotransform[2]
+    y_geo = geotransform[3] + x_pixel * geotransform[4] + y_line * geotransform[5]
+
+    `x_pixel` and `y_line` : pixel coordinates of a point in the raster, 
+    `x_geo` and `y_geo` : corresponding georeferenced coordinates.
+
+    In addition, to extract the value in the centre of the pixels, we add 1/2 of width and height respectively.
+    x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+    y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
+
+    '''    
+    
+    # Get the shape of the rasters
+    # Open the first raster and get its metadata
+    raster1 = gdal.Open(raster1_path)
+    raster1_transform = raster1.GetGeoTransform()
+    print(f"raster1_transform : {raster1_transform}")
+    raster1_band = raster1.GetRasterBand(1)
+    raster1_noDataValue = raster1_band.GetNoDataValue()
+
+    # Open the second raster and get its metadata
+    raster2 = gdal.Open(raster2_path)
+    raster2_transform = raster2.GetGeoTransform()
+    raster2_band = raster2.GetRasterBand(1)
+    raster2_noDataValue = raster2_band.GetNoDataValue()
+
+    # Get the size of the rasters
+    x_size = raster1.RasterXSize
+    y_size = raster1.RasterYSize
+    print(f"size x, y : {x_size} , {y_size}")
+
+    # Create an empty array to store the samples
+    samples = np.zeros((num_samples, 4))
+    # Loop through the number of samples
+    sampleCont = 0
+    while sampleCont<num_samples:
+        i = np.random.randint(0, x_size)
+        j = np.random.randint(0, y_size)
+        # Generate random coordinates within the raster limits
+        x = i * raster1_transform[1] + raster1_transform[0]+ raster1_transform[1]/2 
+        y = j * raster1_transform[5] + raster1_transform[3]+ raster1_transform[5]/2 
+        
+        # Extract the values from the two rasters at the selected coordinates
+        value1 = raster1_band.ReadAsArray(i, j, 1, 1)[0][0]
+        value2 = raster2_band.ReadAsArray(i, j, 1, 1)[0][0]
+
+        # Check if neither value is : NoData OR NaN
+        if (value1!= raster1_noDataValue and value1 != np.NaN and value2 != raster2_noDataValue and value2 != np.NaN):
+            # Add the values to the samples array
+            samples[sampleCont] = [x, y, value1, value2]
+            sampleCont+=1    
+
+    return samples
+
+def getFieldValueFromPolygon(vector_path, field_name, x, y):
+    # Open the vector file
+    vector = ogr.Open(vector_path)
+    layer = vector.GetLayer()
+    
+    # Create a point geometry for the given coordinate pair
+    point = ogr.Geometry(ogr.wkbPoint)
+    point.AddPoint(x, y)
+    
+    # Set up a spatial filter to select features that intersect with the point
+    layer.SetSpatialFilter(point)
+    
+    # Get the value of the specified field for each intersecting feature
+    values = []
+    for feature in layer:
+        values.append(feature.GetField(field_name))
+    
+    # Return the first value if there is at least one intersecting feature
+    if values:
+        return values[0]
+    else:
+        return 0
+
+
+
 ############################
 #### Datacube_ Extract  ####
 ############################
@@ -1289,7 +1521,7 @@ class WbT_DEM_FeatureExtraction():
                 print("There was an error removing intermediate results : \n {error}")
         return self.FilledDEM
 
-    def d8_Pointer(self):
+    def d8_Pointer(self)-> os.path:
         '''
         Compute single flow direction based on the D* algorithm. Each cell is assigned with the direction pointing to the lowest neighbour.  
         @argument:
@@ -1305,7 +1537,7 @@ class WbT_DEM_FeatureExtraction():
             )
         return output
     
-    def d8_flow_accumulation(self):
+    def d8_flow_accumulation(self)-> os.path:
         '''
         @DEM: Filled DEM raster.
         @Output: d8_flow Accumulation raster from a filled DEM.
@@ -1323,7 +1555,7 @@ class WbT_DEM_FeatureExtraction():
             ) 
         return d8FAccOutput
     
-    def jensonPourPoints(self,inOutlest,streams):
+    def jensonPourPoints(self,inOutlest,streams)-> os.path:
         '''
         Replace the points in the @inOutlet to the nearest stream. 
         @inOutlet: vector(point), Containig the point/s(outlet) to be replaced.
@@ -1331,21 +1563,22 @@ class WbT_DEM_FeatureExtraction():
         @output: Output vector file.
         @snap_dist	Maximum snap distance in map units (default = 15.0). Distance as radius search area. 
         '''
-        jensenOutput = "correctedSnapPoints.shp"
+        jensonOutput = addSubstringToName(inOutlest,"_JensonPoint")
         wbt.jenson_snap_pour_points(
             inOutlest, 
             streams, 
-            jensenOutput, 
+            jensonOutput, 
             snap_dist = 15.0, 
             callback=default_callback
             )
         print("jensonPourPoints Done")
+        return jensonOutput
 
-    def watershedConputing(self,d8Pointer, jensenOutput):  
+    def watershedConputing(self,d8Pointer, jensonOutput)-> os.path:  
         output = addSubstringToName(self.FilledDEM, "_watersheds")
         wbt.watershed(
             d8Pointer, 
-            jensenOutput, 
+            jensonOutput, 
             output, 
             esri_pntr=False, 
             callback=default_callback
@@ -1353,7 +1586,18 @@ class WbT_DEM_FeatureExtraction():
         print("watershedConputing Done")
         return output
 
-    def DInfFlowAcc(self, inD8Pointer, log = False):
+    def watershedHillslopes(self,d8Pointer, streams)-> os.path:  
+        output = addSubstringToName(self.FilledDEM, "_hillslope")
+        wbt.hillslopes(
+            d8Pointer, 
+            streams, 
+            output, 
+            esri_pntr=False, 
+            callback=default_callback
+        )
+        return output
+
+    def DInfFlowAcc(self, inD8Pointer, log = False)-> os.path:
         ''' 
         Compute DInfinity flow accumulation algorithm.
         Ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#dinfflowaccumulation  
@@ -1403,7 +1647,7 @@ class WbT_DEM_FeatureExtraction():
         )
         return output
 
-    def computeStrahlerOrder(self,d8_pointer, streamRaster):
+    def computeStrahlerOrder(self,d8_pointer, streamRaster)-> os.path:
         '''
         @Input: raster D8 pointer file
         @streams: Input raster streams file
@@ -1443,7 +1687,7 @@ class WbT_DEM_FeatureExtraction():
         # Get the maximum value
         return mainRiverPath
 
-    def WbT_HAND(self,streams):
+    def WbT_HAND(self,streams)-> os.path:
         '''
         This function requires a filled DEM as input. 
         @DEM: raster: Filled DEM.
@@ -1459,7 +1703,7 @@ class WbT_DEM_FeatureExtraction():
         )
         return output
         
-    def WbT_HAND_euclidean(self,streams):
+    def WbT_HAND_euclidean(self,streams)-> os.path:
         '''
         Compute the elevation as the euclidian distance from the river to each cell.
         ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#elevationabovestreameuclidean
@@ -1531,7 +1775,7 @@ class WbT_DEM_FeatureExtraction():
             )
         return output
 
-    def computeRasterHistogram(self,inRaster):
+    def computeRasterHistogram(self,inRaster)-> os.path:
         '''
         For details see Whitebox Tools references at:
         https://www.whiteboxgeo.com/manual/wbt_book/available_tools/mathand_stats_tools.html?#RasterHistogram
@@ -1762,17 +2006,6 @@ class generalRasterTools():
     
     def setWBTWorkingDir(self, workingDir):
         wbt.set_working_dir(workingDir)
-
-#WbW. TO SLOW: To be checked.  
-def clip_raster_to_polygon(inputRaster, maskVector, outPath, maintainDim:bool = False )->os.path:
-    wbt.clip_raster_to_polygon(
-        inputRaster, 
-        maskVector, 
-        outPath, 
-        maintainDim, 
-        callback=default_callback
-        )
-    return outPath
 
 # Helpers
 def checkTifExtention(fileName):

@@ -53,44 +53,7 @@ def createShpList(parentDir)-> os.path:
     U.createCSVFromList(OutCSVPath,listOfPath)
     return OutCSVPath 
 
-def computeHANDfromBasinPolygon(cfg: DictConfig, csvListOfBasins:os.path):
-    '''
-    #########################################################
-    ##### Compute HAND in a serie of basins. #################
-    ##### Bisins are provided as input path in a csv file. ##
-    #########################################################
-    '''
-    listOfPath = U.createListFromCSV(csvListOfBasins)
-    for f in listOfPath:
-        bbox = U.get_Shpfile_bbox_str(f)
-        d ={'bbox':bbox}
-        print(f"Extrtaxted BBox : {bbox}")
-        U.dc_extraction(cfg,args = d)
-        clipPath, HANDPath = settingsForClipDEMAndHandComputing(f)
-        print(f"ClipPath: {clipPath}")
-        print(f"HANDPath: {HANDPath}")
-        U.computeHANDPCRaster(clipPath,HANDPath)
-
-def computeProximityFromDEMList(csvListOfDEMs)->os.path:
-    '''
-    Starting from a DEM" list, compute for each raster in the list:
-        -  the main river network with PCRaster tools.
-        -  compte proximity raster with computeProximity() from GDAL. 
-    
-    @demPath: Path to the DEM file in *.tif format
-    @return: Path to the computed proximity map. 
-    '''
-    listOfPath = U.createListFromCSV(csvListOfDEMs)
-    for DEMPath in listOfPath:
-        with U.timeit():
-            print(f"Start processing --> {DEMPath}")   
-            mainRiverTiff = U.extractHydroFeatures(DEMPath)
-            ##### Compute proximity
-            proximity = U.computeProximity(mainRiverTiff,value=[5,6,7,8,9,10,11,12,13,14])
-            print(f"Proximity created at --> {proximity}")
-            print('########_____________________#########')
-
-def DEMFeaturingForMLP_WbT(DEM):
+def DEMFeaturingForMLP_WbT(DEM, pourPoint)-> list:
     '''
     The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools library. All output adress are managed into the class WbT_DEM_FeatureExtraction(). Also the WbT_working directory is setted at the same parent dir of the input DEM. 
     The steps are (See function description formmore details.):
@@ -101,25 +64,36 @@ def DEMFeaturingForMLP_WbT(DEM):
     5- Extract stream.
     6- Compute stream order with Strahler Order.
     7- Compute HAND.
-    8- Compute HAND_euclidean
-    9- Compute distance to stream.
-    10- Smapling(TODO)    
+    8- Compute distance to stream.
+
+    @DEM: Deigital elevation mode raster.
+    @Return: A list of some produced maps. The maps to be added to a multiband *.tif.
     '''
+    outList = [DEM]
     DEM_Features = U.WbT_DEM_FeatureExtraction(DEM)
-    DEM_Features.wbT_geomorphons()
-    # DEM_Features.fixNoDataAndfillDTM()
-    # U.replace_no_data_value(DEM_Features.FilledDEM)
-    # DEM_Features.computeSlope()
-    # D8Pointer = DEM_Features.d8_Pointer()  
-    # FAcc = DEM_Features.d8_flow_accumulation()
-    # stream = DEM_Features.extract_stream(FAcc)
-    # strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
-    # mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
-    # DEM_Features.WbT_HAND(mainRiver)
-    # DEM_Features.WbT_HAND_euclidean(mainRiver)
-    # DEM_Features.wbT_geomorphons()
-    # U.computeProximity(mainRiver)
-    return True  # True - If no error is encountered in the process, otherwhise, WbT error will apears. 
+    geomorph = DEM_Features.wbT_geomorphons()
+    U.replace_no_data_value(geomorph)
+    outList.append(geomorph)
+    DEM_Features.fixNoDataAndfillDTM()
+    slope = DEM_Features.computeSlope()
+    outList.append(slope)
+    D8Pointer = DEM_Features.d8_Pointer()  
+    FAcc = DEM_Features.d8_flow_accumulation()
+    U.replace_no_data_value(FAcc)
+    FAccNorm = U.normalize_raster(FAcc)
+    outList.append(FAccNorm)
+    stream = DEM_Features.extract_stream(FAcc)
+    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
+    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
+    HAND = DEM_Features.WbT_HAND(mainRiver)
+    outList.append(HAND)
+    proximity = U.computeProximity(mainRiver)
+    outList.append(proximity)
+    ## Catchment extraction
+    jenson = DEM_Features.jensonPourPoints(pourPoint,mainRiver)
+    DEM_Features.watershedConputing(D8Pointer,jenson)
+    DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
+    return outList  # True - If no error is encountered in the process, otherwhise, WbT error will apears. 
 
 def runFunctionInLoop(csvList, function):
     '''
@@ -133,7 +107,7 @@ def runFunctionInLoop(csvList, function):
         else:
             print(f"Path not found -> {path}")
 
-def cropTifListWithMaskList(cfg: DictConfig, maskList:os.path):
+def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
     wdir = cfg['output_dir']
     maskList = U.createListFromCSV(maskList)
     tifList = U.listFreeFilesInDirByExt_fullPath(wdir,'.tif')
@@ -144,13 +118,10 @@ def cropTifListWithMaskList(cfg: DictConfig, maskList:os.path):
             if maskName in tifName:
                 outPath = os.path.join(wdir,maskName+'_clip.tif')
                 print('-----------------------Croping --------------------')
-                out = U.crop_tif(i,j,outPath)
+                U.crop_tif(i,j,outPath)
                 print(f'{outPath}')
                 print('-----------------------Croped --------------------  \n')
-    
-
-    
-    
+    print("All done --->")        
     return True
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
@@ -159,9 +130,21 @@ def main(cfg: DictConfig):
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
-    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsPolygonsShp.csv'
-    cropTifListWithMaskList(cfg,csvList)
-    
+    # # runFunctionInLoop(csvList,DEMFeaturingForMLP_WbT)
+    # DEM = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_FullBasin_clip.tif'
+    # outlet = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Quesnel_ok/PointLayer.shp'
+    # tifsList = DEMFeaturingForMLP_WbT(DEM,outlet)
+    outMultibandTif = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_dataset.tif'
+    # U.merge_rasters(tifsList,outMultibandTif)
+    # U.replace_no_data_value(outMultibandTif)
+    # datasetArray = U.randomSamplingMultiBandRaster(outMultibandTif,0.001)
+
+    labels = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Quesnel_ok/BC_Quesnel_floodLabel.shp'
+    print(U.getFieldValueFromPolygon(labels,'percentage',-1766360.9,826698.5))
+
+    # print(datasetArray[0:5,:])
+
+
 if __name__ == "__main__":
     with U.timeit():
         main()  
