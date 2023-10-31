@@ -1,5 +1,6 @@
 # import dc_extract
 import os
+import pandas as pd
 from typing import Tuple
 import hydra 
 from hydra.utils import instantiate
@@ -14,29 +15,6 @@ from pcraster import *
 from osgeo import gdal
 from osgeo.gdalconst import *
 
-def removeFilesBySubstring(parentPath,subStr:str=''):
-    list = U.listALLFilesInDirBySubstring_fullPath(parentPath,subStr)
-    for i in list:
-        U.removeFile(i)
-
-def settingsForClipDEMAndHandComputing(maskVectorPath:os.path)-> Tuple:
-    '''
-    To be run after dc_extract. Make sure the dc_output directory contains only one file (The right one..)
-    
-    '''
-    transitForlder = r'C:/Users/abfernan/CrossCanFloodMapping/GISAutomation/dc_output' 
-    ### Take DEM from dc_extraction output folder (*.tif) and create a new folder to write Outputs ###
-    tifFile = U.listFreeFilesInDirByExt_fullPath(transitForlder, ext='.tif')
-        ##  Create Output paths for the DEM's products (Clip.tif & HAND.map) at the maskVector directory. 
-    path,communName,_ = U.get_parenPath_name_ext(maskVectorPath)
-    clipPath =os.path.join(path,str(communName+'_Clip.tif'))
-    HandPathMap = os.path.join(path,str(communName+'_HAND.map'))
-            # Clip the DTM
-    U.clipRasterByMask(tifFile[0],maskVectorPath,clipPath)
-     # # Clean dtransitForlder
-    U.clearTransitFolderContent(transitForlder)
-    return clipPath, HandPathMap
-
 def logger(cfg: DictConfig, nameByTime):
     '''
     You can log all you want here!
@@ -47,13 +25,25 @@ def logger(cfg: DictConfig, nameByTime):
     # logging.info(f"dc_description inputs: {cfg.dc_Extract_params.dc_describeCollections}")
     # logging.info(f"dc_extract inputs: {cfg.dc_Extract_params.dc_extrac_cog}")
 
+def runFunctionInLoop(csvList, function):
+    '''
+    Given a list <csvList>, excecute the <function> in loop, with one element from the csv as argument, at the time.  
+    '''
+    listOfPath = U.createListFromCSV(csvList)
+    for path in listOfPath:
+        if os.path.exists(path):
+            with U.timeit():
+                function(path)
+        else:
+            print(f"Path not found -> {path}")
+
 def createShpList(parentDir)-> os.path:
     listOfPath = U.listALLFilesInDirByExt_fullPath(parentDir,ext='.shp')
     OutCSVPath = os.path.join(parentDir,'listOfShpFiles.csv')
     U.createCSVFromList(OutCSVPath,listOfPath)
     return OutCSVPath 
 
-def DEMFeaturingForMLP_WbT(DEM, pourPoint)-> list:
+def DEMFeaturingForMLP_WbT(DEM)-> list:
     '''
     The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools library. All output adress are managed into the class WbT_DEM_FeatureExtraction(). Also the WbT_working directory is setted at the same parent dir of the input DEM. 
     The steps are (See function description formmore details.):
@@ -68,20 +58,24 @@ def DEMFeaturingForMLP_WbT(DEM, pourPoint)-> list:
 
     @DEM: Deigital elevation mode raster.
     @Return: A list of some produced maps. The maps to be added to a multiband *.tif.
+    
+    NOTE: Also save a list of produced features in a csv file for further automation process. 
     '''
     outList = [DEM]
     DEM_Features = U.WbT_DEM_FeatureExtraction(DEM)
     geomorph = DEM_Features.wbT_geomorphons()
     U.replace_no_data_value(geomorph)
     outList.append(geomorph)
+    FloodOrd = DEM_Features.FloodOrder()
+    U.replace_no_data_value(FloodOrd)
+    outList.append(FloodOrd)
     DEM_Features.fixNoDataAndfillDTM()
     slope = DEM_Features.computeSlope()
     outList.append(slope)
     D8Pointer = DEM_Features.d8_Pointer()  
     FAcc = DEM_Features.d8_flow_accumulation()
     U.replace_no_data_value(FAcc)
-    FAccNorm = U.normalize_raster(FAcc)
-    outList.append(FAccNorm)
+    outList.append(FAcc)
     stream = DEM_Features.extract_stream(FAcc)
     strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
     mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
@@ -90,60 +84,65 @@ def DEMFeaturingForMLP_WbT(DEM, pourPoint)-> list:
     proximity = U.computeProximity(mainRiver)
     outList.append(proximity)
     ## Catchment extraction
-    jenson = DEM_Features.jensonPourPoints(pourPoint,mainRiver)
-    DEM_Features.watershedConputing(D8Pointer,jenson)
     DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
-    return outList  # True - If no error is encountered in the process, otherwhise, WbT error will apears. 
+    ### Save the list of features path as csv. 
+    csvPath = U.replaceExtention(DEM,'_FeaturesList.csv')
+    U.createCSVFromList(outList,csvPath)
+    return outList  
 
-def runFunctionInLoop(csvList, function):
+def fromDEMtoDataFrame(DEM,labels,target:str='percentage',mask:os.path=None)->pd.DataFrame:
     '''
-    Given a list <csvList>, excecute the <function> in loop, with one element from the csv as argument at the time.  
+    Testing the process of sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
     '''
-    listOfPath = U.createListFromCSV(csvList)
-    for path in listOfPath:
-        if os.path.exists(path):
-            with U.timeit():
-                function(path)
-        else:
-            print(f"Path not found -> {path}")
-
-def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
-    wdir = cfg['output_dir']
-    maskList = U.createListFromCSV(maskList)
-    tifList = U.listFreeFilesInDirByExt_fullPath(wdir,'.tif')
-    for i in tifList:
-        _,tifName,_ = U.get_parenPath_name_ext(i)
-        for j in maskList:
-            _,maskName,_ =U.get_parenPath_name_ext(j)
-            if maskName in tifName:
-                outPath = os.path.join(wdir,maskName+'_clip.tif')
-                print('-----------------------Croping --------------------')
-                U.crop_tif(i,j,outPath)
-                print(f'{outPath}')
-                print('-----------------------Croped --------------------  \n')
-    print("All done --->")        
-    return True
+    ## Create features for dataset
+    bandsList = DEMFeaturingForMLP_WbT(DEM)
+    ## Extract the band name from the full path of features
+    colList = U.extractNamesListFromFullPathList(bandsList)
+    ## Build a multiband raster to ensure spatial correlation between features.
+    rasterMultiband = U.addSubstringToName(DEM,'_dataset')
+    U.stackBandsInMultibandRaster(bandsList)
+    ## Crop the multiband raster if needed.
+    if mask:
+        cropped = U.addSubstringToName(rasterMultiband,'_crop')
+        raster = U.crop_tif(rasterMultiband,mask,cropped)
+    else:
+        raster = rasterMultiband
+    ## Random sampling the raster with a density defined by the ratio. This is the more expensive opperation..by patient. 
+    samplesArr = U.randomSamplingMultiBandRaster(raster,ratio=0.0001)
+    ## Build a dataframe with the samples
+    df = pd.DataFrame(samplesArr,columns=colList)
+    ## Extract coordinates columns to sample from label. 
+    xyList = samplesArr[:,0:2]
+    labesColumn = []
+    for i in range(0, xyList.shape[0]):
+        labesColumn.append(U.getFieldValueFromPolygon(labels,target,xyList[i,0],xyList[i,1]))
+    ## Add labels to the DataFrame
+    df['target'] = labesColumn
+    ## Saving DataFrame as csv
+    scv_output = U.replaceExtention(rasterMultiband,'_DFrame.csv')
+    df.to_csv(scv_output)
+    return df
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
-    # chIn   # To check in the wbtools license
+    # chIn   # To check-in the wbtools license
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # # runFunctionInLoop(csvList,DEMFeaturingForMLP_WbT)
-    # DEM = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_FullBasin_clip.tif'
-    # outlet = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Quesnel_ok/PointLayer.shp'
-    # tifsList = DEMFeaturingForMLP_WbT(DEM,outlet)
-    outMultibandTif = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_dataset.tif'
-    # U.merge_rasters(tifsList,outMultibandTif)
-    # U.replace_no_data_value(outMultibandTif)
-    # datasetArray = U.randomSamplingMultiBandRaster(outMultibandTif,0.001)
+    DEM = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_FullBasin_clip.tif' 
+    DEmFeaturs = U.WbT_DEM_FeatureExtraction(DEM)
+    DEmFeaturs.FloodOrder()
+    # WbTransf = U.generalRasterTools(WbWDir)
 
-    labels = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Quesnel_ok/BC_Quesnel_floodLabel.shp'
-    print(U.getFieldValueFromPolygon(labels,'percentage',-1766360.9,826698.5))
-
-    # print(datasetArray[0:5,:])
-
+    # raster= r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_dataset.tif'
+    # bandList_csv = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Quesnel_ok/BC_Quesnel_bands.csv'
+    # samplingArea = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Quesnel_ok/SamplingArea.shp'
+    # labels = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Quesnel_ok/BC_Quesnel_floodLabel.shp'
+    # bandList =U.createListFromCSV(bandList_csv)
+    # colList = U.extractNamesListFromFullPathList(bandList,['x_coord','y_coord'])
+    # df = fromDEMtoDataFrame(raster,colList,labels,mask=samplingArea)
+    # print(df.head)
 
 if __name__ == "__main__":
     with U.timeit():
@@ -162,12 +161,3 @@ if __name__ == "__main__":
     
     # for csv in csvTilesList:
     #     WbTransf.mosaikAndResamplingFromCSV(csv,8,'Ftp_dtm')
-
-#### Compute operation on alist of path from a csv
-# listOfPath = U.createListFromCSV(csvList)
-#     for DEMPath in listOfPath:
-#         if os.path.exists(DEMPath):
-#             with U.timeit():
-#                 DEMFeaturingForMLP_WbT(DEMPath)
-#         else:
-#             print(f"Is not dir-> {DEMPath}")

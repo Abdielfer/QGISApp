@@ -90,6 +90,11 @@ def removeFile(filePath):
         print("File path can not be removed")
         return False
 
+def removeFilesBySubstring(parentPath,subStr:str=''):
+    list = listALLFilesInDirBySubstring_fullPath(parentPath,subStr)
+    for i in list:
+        removeFile(i)
+
 def createTransitFolder(parent_dir_path, folderName:str = 'TransitDir'):
     path = os.path.join(parent_dir_path, folderName)
     ensureDirectory(path)
@@ -107,6 +112,20 @@ def clearTransitFolderContent(path:str, filetype = '/*'):
     for f in files:
         os.remove(f)
     return True
+
+def extractNamesListFromFullPathList(pathlist, initialValues:list=[])-> list:
+    '''
+    From the list of path extract the names, then split by underscore 
+    character and returns a list of the last substring from each element in the input.
+    '''
+    if initialValues:
+        listOfNames = initialValues
+    else:
+        listOfNames =[]
+    for path in pathlist:
+        _,tifName,_ = get_parenPath_name_ext(path)
+        listOfNames.append(tifName.split("_")[-1])
+    return listOfNames
 
 def listFreeFilesInDirByExt(cwd:str, ext = '.tif'):
     '''
@@ -196,10 +215,10 @@ def createListFromCSV(csv_file_location, delim:str =','):
     Argument:
     @csv_file_location: full path file location and name.
     '''       
-    df = pd.read_csv(csv_file_location, index_col= None, delimiter = delim)
+    df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
     out = []
     for i in range(0,df.shape[0]):
-        out.append(df.iloc[i,:].tolist()[0])    
+        out.append(df.iloc[i,:].tolist()[0])     
     return out
 
 def createListFromCSVColumn(csv_file_location, col_idx, delim:str =','):  
@@ -308,6 +327,34 @@ def updateDict(dic:dict, args:dict)->dict:
             outDic[k]= args[k]
     return outDic
 
+def createDataframeFromArray(data, columns, csvPath:os.path= None)->pd.DataFrame:
+    '''
+    The function takes as input a numpy array and creates a pandas dataframe with the specified column names. 
+    @data: numpy array
+    @columns: list of column names
+    @file_path: path to the CSV file. (Optional)
+    @return: pd.DataFrame
+
+    OPTIONAL: Save the DataFrame as csv file if csvPath is defined
+    '''
+    print(f'Column names are : {len(columns)}')
+    print(f'Array shape : {data.shape}')
+    df = pd.DataFrame(data, columns=columns)
+    if csvPath:
+        df.to_csv(csvPath, index=False)
+    return df
+
+def isCoordPairInArray(arr, pair) ->bool:
+    '''
+    Verify if a pair of coordinates values exist in the array. We asume that column[0] contain x_coordinates
+    and column[1] contain y_coordinates
+    The goal is to check if the coordinates of a map already exist in an array of map samples. 
+    @pair: np.array like [x,y]
+    @Return:Bool: True if pair is found, False otherwise.
+    '''
+    x, y = pair
+    out = np.any(arr[np.where(arr[:,0]==x),1] == y)
+    return out
 
 ###################            
 ### General GIS ###
@@ -410,6 +457,27 @@ def getNeighboursValues(raster)-> np.array:
 
     return neighbours
 
+def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
+    '''
+    Given a list of polygons, the algorith find all tif files in the wdir and IF any names match ocurre, the tif is 
+    cropped with the corresponding mask.
+    '''
+    wdir = cfg['output_dir']
+    maskList = createListFromCSV(maskList)
+    tifList = listFreeFilesInDirByExt_fullPath(wdir,'.tif')
+    for i in tifList:
+        _,tifName,_ = get_parenPath_name_ext(i)
+        for j in maskList:
+            _,maskName,_ = get_parenPath_name_ext(j)
+            if maskName in tifName:
+                outPath = os.path.join(wdir,maskName+'_clip.tif')
+                print('-----------------------Cropping --------------------')
+                crop_tif(i,j,outPath)
+                print(f'{outPath}')
+                print('-----------------------Cropped --------------------  \n')
+    print("All done --->")        
+    return True
+
 #######################
 ### Rasterio Tools  ###
 #######################
@@ -458,11 +526,16 @@ def createRaster(savePath:os.path, data:np.array, profile, noData:int = None):
             print("Created new raster>>>")
     return savePath
 
-def stack_rasters(input_paths, output_path):
+def stackBandsInMultibandRaster(input_paths, output_path):
+    '''
+    Given a series of raster in the <input_path>, the algorithm create a multiband raster to the <output_path>.
+    @input_path: List of path to a single band rasters.
+    @output_path: Output path to save the multiband raster. 
+    '''
     src_files_to_mosaic = []
     i = 0
     for path in input_paths:
-        print(f'band {i} : {path}')
+        # print(f'band {i} : {path}')
         i+=1
         src = rio.open(path)
         src_files_to_mosaic.append(src)
@@ -543,7 +616,7 @@ def computeRasterMinMax(rasterPath:os.path):
     print(f"RAster min: {rasMin}, raster max {rasMin}")
     return rasMin, rasMax
 
-def computeRasterQuantiles(rasterPath, q:list=[0.25, 0.5, 0.945]):
+def computeRasterQuantiles(rasterPath, q:list=[0.25, 0.945]):
     rasDataNan = replaceRastNoDataWithNan(rasterPath)
     # rasDataNan,_ = readRasterWithRasterio(rasterPath)
     quantiles = np.nanquantile(rasDataNan, q)
@@ -572,12 +645,14 @@ def normalize_raster(inputRaster):
                 dst.write(normalized_data, i)
     return outputRaster
 
-
-def randomSamplingMultiBandRaster(rasterIn, ratio:float=1)-> np.array:
+def randomSamplingMultiBandRaster(rasterIn,ratio:float=1)-> np.array:
     '''
-    
-    
-    
+    Given a multiband raster, the algorith, takes a random number of saples and retur in np.array format. 
+    The samples are ONLY VALID points according the criteria of been not NODataValue. (bandsArray[0]!= NoData and bandsArray[0] != np.NAN)
+    The samples are not repeated coordinates pairs.
+    @rasterIn: the path to the input raster.
+    @ratio: the proportion of existing pixels in the <rasterIn> to be sampled. 
+    @return: np.array with a series of samplin points.
     '''
     sampleCont =0    
     arrayDataset = []
@@ -598,35 +673,28 @@ def randomSamplingMultiBandRaster(rasterIn, ratio:float=1)-> np.array:
             ## Extract banda values as vector
             bandsArray = data[:, i, j]
             # Check if neither value is NoData OR NaN in the first band (DEM)
-            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN):
+            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN) and not isCoordPairInArray(arrayDataset,xy):
                 # Add the sample to the dataset
                 arrayDataset[sampleCont] = np.concatenate((xy, bandsArray))
-                sampleCont+=1    
+                sampleCont+=1
+                if sampleCont%1000 == 0:
+                    print(f'{sampleCont-1} found') 
     return arrayDataset
 
-def get_field_value(labels, field_name, x_coord,y_coord):
+def getRasterSampleFromPoint(raster,xy):
     '''
-    This code reads in a vector map using rasterio.
-    Then uses geometry_mask to find all features that intersect with the given coordinate pair. 
-    It then extracts the value of the specified field for each intersecting feature and returns the first value if there is at 
-    least one intersecting feature.
+    Extract a sample from aa raster given a pari of coordinates xy.
+      NOTE: This function do not make any veryfication.Important to ensure xy coordinates pair comes from the same crs of the raster.
+    @xy: array of coordinates like [x,y].
+    @raster: os.path to the raster to sample
+    @return: a 1D array with the values of all the bands in the <raster> at the coordinates <xy>.
     '''
-    with rio.open(labels) as src:
-        # Get the geometry of the point
-        point_geom = {'type': 'Point', 'coordinates': (x_coord, y_coord)}
-        # Get the features that intersect with the point
-        features = rio.features.geometry_mask([point_geom],
-                                                    out_shape=src.shape,
-                                                    transform=src.transform,
-                                                    invert=True)
-        # Get the values of the specified field for each intersecting feature
-        values = [f[field_name] for f, v in zip(src.sample(), features) if v]
-        # Return the first value if there is at least one intersecting feature
-        if values:
-            return values[0]
-        else:
-            return 0
-        
+    x,y = xy
+    with rio.open(raster) as src:
+        # Read data from bands into an array
+        data = src.read()
+        bandsArray = data[:, x, y]
+    return bandsArray
 
 ###########################
 ####   PCRaster Tools  ####
@@ -883,7 +951,6 @@ class RasterGDAL():
         print(f"projection : {self.projection}")
         print(f"MetaData : {self.MetaData}")
 
-
 def replace_no_data_value(dataset_path, new_value:float = -9999):
     dataset = gdal.Open(dataset_path, gdal.GA_Update)
     for i in range(1, dataset.RasterCount + 1):
@@ -896,12 +963,6 @@ def replace_no_data_value(dataset_path, new_value:float = -9999):
         band.WriteArray(band_array)
         band.SetNoDataValue(new_value)
     dataset.FlushCache()
-
-def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
-    mask_bbox = get_Shpfile_bbox(vectorMask)
-    gdal.Warp(outPath, DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
-    print(f"Successfully clipped at : {outPath}")
-    return outPath
 
 def translateToTiff(inPath) -> bool:
     """
@@ -1047,7 +1108,6 @@ def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     Returns:
         str: Path to the output TIFF file.
     """
-    print(f'Into crop_tif, tif_file: {inputRaster}')
     # Open the input TIFF file
     dataset = gdal.Open(inputRaster)
     cols = dataset.RasterXSize
@@ -1076,6 +1136,16 @@ def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
     # ,cutlineLayer = 'bc_quesnel'
     # Close the datasets
     dataset = output_dataset= shapefile_ds = None
+    return outPath
+
+def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
+    '''
+    Simplified version of crop_tif() WORKS well! However, do not perform extra operations like correct NoData or verify crs.
+    If you are sure of your inputs and outputs, use it.
+    '''
+    mask_bbox = get_Shpfile_bbox(vectorMask)
+    gdal.Warp(outPath, DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
+    print(f"Successfully clipped at : {outPath}")
     return outPath
 
 def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
@@ -1126,7 +1196,7 @@ def computeProximity(inRaster, value:int= 1, outPath:os.path = None) -> os.path:
     del ds, out_ds
     return outPath
 
-def get_neighbors_GDAL(raster_file, shape_file):
+def getNeighborsGDAL(raster_file, shape_file):
     """
     This function takes a raster and a shapefile as input and returns an array containing
     the values of the 8 neighbors of each pixel in the raster. The inputs must be in the
@@ -1213,7 +1283,7 @@ def get_neighbors_GDAL(raster_file, shape_file):
 
     return output_array
 
-def sampling_Full_rasters(raster1_path, raster2_path) -> np.array:
+def samplingTwoFaster(raster1_path, raster2_path) -> np.array:
     '''
     This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value  raster one, Z_value raster two]. 
     The first input raster is used as a reference. 
@@ -1283,7 +1353,7 @@ def sampling_Full_rasters(raster1_path, raster2_path) -> np.array:
     print(f'One sample: {sampled_points[2:]}')
     return sampled_points
     
-def randomSampling_rasters(raster1_path, raster2_path, num_samples) -> np.array:
+def randomSamplingTwoRaster(raster1_path, raster2_path, num_samples) -> np.array:
     '''
     This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value rather one, Z_value rather two]. 
     The first input raster is used as a reference. 
@@ -1360,26 +1430,20 @@ def getFieldValueFromPolygon(vector_path, field_name, x, y):
     # Open the vector file
     vector = ogr.Open(vector_path)
     layer = vector.GetLayer()
-    
     # Create a point geometry for the given coordinate pair
     point = ogr.Geometry(ogr.wkbPoint)
-    point.AddPoint(x, y)
-    
+    point.AddPoint(x,y)
     # Set up a spatial filter to select features that intersect with the point
     layer.SetSpatialFilter(point)
-    
     # Get the value of the specified field for each intersecting feature
     values = []
     for feature in layer:
         values.append(feature.GetField(field_name))
-    
     # Return the first value if there is at least one intersecting feature
     if values:
         return values[0]
     else:
         return 0
-
-
 
 ############################
 #### Datacube_ Extract  ####
@@ -1636,7 +1700,7 @@ class WbT_DEM_FeatureExtraction():
         if not threshold:
             Quant = computeRasterQuantiles(FAcc)
             print(f" The FAcc quantiles are_______ {Quant}")
-            threshold = Quant[2] ### All values greater than the 75% of Flow Acc map. 
+            threshold = Quant[1] ### All values greater than the 75% of Flow Acc map. 
             print(f" The FAcc threshold is_______ {threshold}")
         wbt.extract_streams(
             FAcc, 
@@ -1760,6 +1824,18 @@ class WbT_DEM_FeatureExtraction():
         )
         return output
 
+    def FloodOrder(self,)-> os.path:
+        ''' 
+        
+        '''
+        output = addSubstringToName(self.DEMName,"_FloodOrd")
+        wbt.flood_order(
+            self.DEMName, 
+            output, 
+            callback=default_callback
+            )
+        return output
+ 
     def euclideanDistance(self,objectiveRaster)->os.path:
         '''
         "This tool will estimate the Euclidean distance (i.e. straight-line distance) between each grid cell and the nearest 'target cell' in the input image. TARGET cells are ALL NON-ZERO AND ALL NON-NODATA grid cells. Distance in the output image is measured in the same units as the horizontal units of the input image." 
