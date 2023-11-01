@@ -264,6 +264,12 @@ def splitFilenameAndExtention(file_path):
     name = fpath.stem
     return name, extention 
 
+def createShpList(parentDir)-> os.path:
+    listOfPath = listALLFilesInDirByExt_fullPath(parentDir,ext='.shp')
+    OutCSVPath = os.path.join(parentDir,'listOfShpFiles.csv')
+    createCSVFromList(OutCSVPath,listOfPath)
+    return OutCSVPath 
+
 def replaceExtention(inPath,newExt: str)->os.path :
     '''
     Just remember to add the poin to the new ext -> '.map'
@@ -2243,15 +2249,17 @@ def plotRasterPDFComparison(DEMList:list,title:str='RasterPDF', ax_x_units:str='
         dem = replaceRastNoDataWithNan(dem,extraNoDataVal=-9999)
         dataRechaped = np.reshape(dem,(-1))
         data= remove_nan_vector(dataRechaped)
-        global_Min = np.minimum(global_Min, np.min(data))
-        global_Max = np.maximum(global_Max, np.max(data))
+        dataMin =  np.min(data)
+        dataMax = np.max(data)
+        global_Min = np.minimum(global_Min,dataMin)
+        global_Max = np.maximum(global_Max,dataMax)
 
         ## If <bins> is a list, add the maximum value to <bins>.  
         if (addmax and isinstance(bins,list)):
             bins.append(global_Max).astype(int)
         
         kde = gaussian_kde(data)
-        dist_space = linspace(global_Min, global_Max, 100 )
+        dist_space = linspace(dataMin, dataMax, 100 )
         ax.plot(dist_space,kde(dist_space),alpha=0.6) 
    
     ax.legend(nameList, prop={'size': 8})

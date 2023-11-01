@@ -1,6 +1,5 @@
 # import dc_extract
 import os
-import pandas as pd
 from typing import Tuple
 import hydra 
 from hydra.utils import instantiate
@@ -8,6 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging 
 # from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance of the license are created, it can kill my license. Thank you!!
+KMP_DUPLICATE_LIB_OK=True
 
 from osgeo import gdal
 from osgeo.gdalconst import *
@@ -34,12 +34,6 @@ def runFunctionInLoop(csvList, function):
         else:
             print(f"Path not found -> {path}")
 
-def createShpList(parentDir)-> os.path:
-    listOfPath = U.listALLFilesInDirByExt_fullPath(parentDir,ext='.shp')
-    OutCSVPath = os.path.join(parentDir,'listOfShpFiles.csv')
-    U.createCSVFromList(OutCSVPath,listOfPath)
-    return OutCSVPath 
-
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     # chIn   # To check-in the wbtools license
@@ -48,7 +42,7 @@ def main(cfg: DictConfig):
     # U.dc_extraction(cfg)
     # # runFunctionInLoop(csvList,DEMFeaturingForMLP_WbT)
     DEM =[r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_FullBasin_dem.tif', r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Salmo_2018_ok\BC_Salmo_FullBasin_clip.tif']
-    U.plotRasterPDFComparison(DEM,ax_x_units='m',save=False)
+    U.plotRasterPDFComparison(DEM,ax_x_units='m',save=False,show=True)
 
 
 if __name__ == "__main__":
