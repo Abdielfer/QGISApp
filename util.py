@@ -6,7 +6,9 @@ from time import strftime
 from typing import Tuple, List, overload
 import pandas as pd
 import numpy as np
+from numpy import linspace
 import matplotlib.pyplot as plt
+from scipy.stats.kde import gaussian_kde
 import torch
 import rasterio as rio
 from rasterio.plot import show_hist
@@ -133,11 +135,11 @@ def listFreeFilesInDirByExt(cwd:str, ext = '.tif'):
     NOTE:  THIS function list only files that are directly into <cwd> path. 
     '''
     cwd = os.path.abspath(cwd)
-    print(f"Current working directory: {cwd}")
+    # print(f"Current working directory: {cwd}")
     file_list = []
     for (root, dirs, file) in os.walk(cwd):
         for f in file:
-            print(f"File: {f}")
+            # print(f"File: {f}")
             _,_,extent = get_parenPath_name_ext(f)
             if extent == ext:
                 file_list.append(f)
@@ -337,8 +339,8 @@ def createDataframeFromArray(data, columns, csvPath:os.path= None)->pd.DataFrame
 
     OPTIONAL: Save the DataFrame as csv file if csvPath is defined
     '''
-    print(f'Column names are : {len(columns)}')
-    print(f'Array shape : {data.shape}')
+    # print(f'Column names are : {len(columns)}')
+    # print(f'Array shape : {data.shape}')
     df = pd.DataFrame(data, columns=columns)
     if csvPath:
         df.to_csv(csvPath, index=False)
@@ -478,6 +480,105 @@ def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
     print("All done --->")        
     return True
 
+
+def DEMFeaturingForMLP_WbT(DEM)-> list:
+    '''
+    The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools library. All output adress are managed into the class WbT_DEM_FeatureExtraction(). Also the WbT_working directory is setted at the same parent dir of the input DEM. 
+    The steps are (See function description formmore details.):
+    1- DEM correction <fixNoDataAndfillDTM()>
+    2- Slope <computeSlope()>
+    3- Compute flow direction <D8_pointe()>
+    4- Compute Flow accumulation <DInfFlowAcc()>
+    5- Extract stream.
+    6- Compute stream order with Strahler Order.
+    7- Compute HAND.
+    8- Compute distance to stream.
+
+    @DEM: Deigital elevation mode raster.
+    @Return: A list of some produced maps. The maps to be added to a multiband *.tif.
+    
+    NOTE: Also save a list of produced features in a csv file for further automation process. 
+    '''
+    outList = [DEM]
+    DEM_Features = WbT_DEM_FeatureExtraction(DEM)
+    print(f"Extracting features from DEM >>>>")
+    ## Geomorphons
+    geomorph = DEM_Features.wbT_geomorphons()
+    replace_no_data_value(geomorph)
+    outList.append(geomorph)
+    print(f"-------------Geomorphons ready at {geomorph}")
+    ## Flood Order
+    FloodOrd = DEM_Features.FloodOrder()
+    replace_no_data_value(FloodOrd)
+    outList.append(FloodOrd)
+    print(f"-------------Flood Order ready at {FloodOrd}")
+    ## DEM Filling
+    DEM_Features.fixNoDataAndfillDTM()
+    print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
+    ## Slope
+    slope = DEM_Features.computeSlope()
+    outList.append(slope)
+    print(f"-------------Slope ready at {slope}")
+    ## Flow direction
+    D8Pointer = DEM_Features.d8_Pointer() 
+    print(f"-------------Flow direction ready at {D8Pointer}")
+    FAcc = DEM_Features.d8_flow_accumulation()
+    replace_no_data_value(FAcc)
+    outList.append(FAcc)
+    print(f"-------------Flow accumulation ready at {FAcc}")
+    stream = DEM_Features.extract_stream(FAcc)
+    print(f"-------------Stream ready at {stream}")
+    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
+    print(f"-------------Strahler Order ready at {strahlerOrder}")
+    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
+    print(f"-------------Main river ready at {mainRiver}")
+    HAND = DEM_Features.WbT_HAND(mainRiver)
+    outList.append(HAND)
+    print(f"-------------HAND index ready at {HAND}")
+    proximity = computeProximity(mainRiver)
+    outList.append(proximity)
+    print(f"-------------Proximity index ready at {proximity}")
+    ## Catchment extraction
+    DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
+    ### Save the list of features path as csv. 
+    csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
+    createCSVFromList(csvPath,outList)
+    print(f"--------Features done!----------")
+    return outList  
+
+def fromDEMtoDataFrame(DEM,labels,target:str='percentage',mask:os.path=None)->pd.DataFrame:
+    '''
+    Testing the process of sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
+    '''
+    ## Create features for dataset
+    bandsList = DEMFeaturingForMLP_WbT(DEM)
+    ## Extract the band name from the list full path of features. Add column names for coordinates
+    colList = extractNamesListFromFullPathList(bandsList,['x_coord','y_coord'])
+    ## Build a multiband raster to ensure spatial correlation between features.
+    rasterMultiband = addSubstringToName(DEM,'_features')
+    stackBandsInMultibandRaster(bandsList,rasterMultiband)
+    ## Crop the multiband raster if needed.
+    if mask:
+        cropped = addSubstringToName(rasterMultiband,'_AOI')
+        raster = crop_tif(rasterMultiband,mask,cropped)
+    else:
+        raster = rasterMultiband
+    ## Random sampling the raster with a density defined by the ratio. This is the more expensive opperation..by patient. 
+    samplesArr = randomSamplingMultiBandRaster(raster,ratio=0.0001)
+    ## Build a dataframe with the samples
+    df = pd.DataFrame(samplesArr,columns=colList)
+    ## Extract coordinates columns to sample from label. 
+    xyList = samplesArr[:,0:2]
+    labesColumn = []
+    for i in range(0, xyList.shape[0]):
+        labesColumn.append(getFieldValueFromPolygon(labels,target,xyList[i,0],xyList[i,1]))
+    ## Add labels to the DataFrame
+    df['target'] = labesColumn
+    ## Saving DataFrame as csv
+    scv_output = replaceExtention(rasterMultiband,'_DataFrame.csv')
+    df.to_csv(scv_output,index=None)
+    return df
+
 #######################
 ### Rasterio Tools  ###
 #######################
@@ -492,7 +593,7 @@ def readRasterWithRasterio(rasterPath:os.path) -> tuple[np.array, dict]:
     inRaster = rio.open(rasterPath, mode="r")
     profile = inRaster.profile
     rasterData = inRaster.read()
-    print(f"raster data shape in ReadRaster : {rasterData.shape}")
+    # print(f"raster data shape in ReadRaster : {rasterData.shape}")
     return rasterData, profile
 
 def read_tiff_advanced(file_path: str) -> Tuple[np.ndarray, str, str]:
@@ -551,7 +652,6 @@ def stackBandsInMultibandRaster(input_paths, output_path):
     with rio.open(output_path, "w", **out_meta) as dest:
         for i, file in enumerate(src_files_to_mosaic):
             dest.write(file.read(1), i+1)
-            print(f' i in enumerate : -> {i}')
 
 def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int = 1):
     if CustomTitle is not None:
@@ -567,7 +667,6 @@ def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int 
 def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> np.array:
     rasterData,profil = readRasterWithRasterio(rasterPath)
     NOData = profil['nodata']
-    print(f"NoData value in replace NOData with Nan is {NOData}")
     rasterDataNan = np.where(((rasterData == NOData)|(rasterData == extraNoDataVal)), np.nan, rasterData) 
     return rasterDataNan
 
@@ -613,7 +712,6 @@ def computeRasterMinMax(rasterPath:os.path):
     rasDataNan = replaceRastNoDataWithNan(rasterPath)
     rasMin = np.nanmin(rasDataNan)
     rasMax = np.nanmax(rasDataNan)
-    print(f"RAster min: {rasMin}, raster max {rasMin}")
     return rasMin, rasMax
 
 def computeRasterQuantiles(rasterPath, q:list=[0.25, 0.945]):
@@ -704,7 +802,7 @@ def computeHANDPCRaster(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=T
     '''
     NOTE: Important to ensure the input DEM has a well defined NoData Value ex. -9999. 
 
-    1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
+    1- *.tif in (DEMPath) is converted to PCRaster *.map format -> saveTiffAsPCRaster(DEM)
     2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
     3- Read DEM in PCRasterformat
     4- Compute flow direction with d8 algorithm -> lddcreate()
@@ -768,7 +866,7 @@ def computeHANDPCRaster(DEMPath,HANDPath,saveDDL:bool=True,saveStrahOrder:bool=T
 def extractHydroFeatures(DEMPath) -> bool:
     '''
     NOTE: Important to ensure the input DEM has a well defined NoData Value ex. -9999. 
-    1- *.tif in (DEMPath) is converted to PCRaster *.map format -> U.saveTiffAsPCRaster(DEM)
+    1- *.tif in (DEMPath) is converted to PCRaster *.map format -> saveTiffAsPCRaster(DEM)
     2- pcr.setClone(DEMMap) : Ensure extention, CRS and other characteristics for creating new *.map files.
     3- Read DEM in PCRasterformat
 
@@ -956,7 +1054,6 @@ def replace_no_data_value(dataset_path, new_value:float = -9999):
     for i in range(1, dataset.RasterCount + 1):
         band = dataset.GetRasterBand(i)
         old_value = band.GetNoDataValue()
-        print(f'Band({i}), NoData Value -> {old_value}')
         band = dataset.GetRasterBand(i)
         band_array = band.ReadAsArray()
         band_array[band_array == old_value] = new_value
@@ -1388,7 +1485,7 @@ def randomSamplingTwoRaster(raster1_path, raster2_path, num_samples) -> np.array
     # Open the first raster and get its metadata
     raster1 = gdal.Open(raster1_path)
     raster1_transform = raster1.GetGeoTransform()
-    print(f"raster1_transform : {raster1_transform}")
+    # print(f"raster1_transform : {raster1_transform}")
     raster1_band = raster1.GetRasterBand(1)
     raster1_noDataValue = raster1_band.GetNoDataValue()
 
@@ -1401,7 +1498,7 @@ def randomSamplingTwoRaster(raster1_path, raster2_path, num_samples) -> np.array
     # Get the size of the rasters
     x_size = raster1.RasterXSize
     y_size = raster1.RasterYSize
-    print(f"size x, y : {x_size} , {y_size}")
+    # print(f"size x, y : {x_size} , {y_size}")
 
     # Create an empty array to store the samples
     samples = np.zeros((num_samples, 4))
@@ -1516,7 +1613,7 @@ class WbT_DEM_FeatureExtraction():
     def __init__(self,DEM) -> None:
         self.parentDir,_,_ = get_parenPath_name_ext(DEM)
         self.DEMName = DEM
-        self.FilledDEM = addSubstringToName(DEM,'_fillWL')
+        self.FilledDEM = addSubstringToName(DEM,'_fill')
         wbt.set_working_dir(self.parentDir)
         print(f"Working dir at: {self.parentDir}")    
 
@@ -1758,7 +1855,7 @@ class WbT_DEM_FeatureExtraction():
         @stream: Input raster streams file
         @Output: Output raster path file
         '''
-        output = addSubstringToName(self.FilledDEM,'_WbT_HAND')
+        output = addSubstringToName(self.FilledDEM,'_HAND')
         wbt.elevation_above_stream(
             self.FilledDEM, 
             streams, 
@@ -2048,7 +2145,7 @@ class generalRasterTools():
     def separate_array_profile(self, input_gtif):
         with rio.open(input_gtif) as src: 
             profile = src.profile
-            print('This is a profile :', profile)
+            # print('This is a profile :', profile)
             arr = src.read()
             src.close() 
         return arr, profile
@@ -2100,4 +2197,79 @@ def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
     for url in tail_URL_NamesList:
         download_url(url, confirmedLocalPath)
     print(f"Tails downloaded to: {confirmedLocalPath}")
+
+##################################################################
+########  DATA Analis tools gor Geo Spatial information   ########
+##################################################################
+
+def remove_nan_vector(array):
+    nan_indices = np.where(np.isnan(array))
+    cleaned_array = np.delete(array, nan_indices)
+    return cleaned_array
+
+def remove_nan(array):
+    nan_indices = np.where(np.isnan(array).any(axis=1))[0]
+    cleaned_array = np.delete(array, nan_indices, axis=0)
+    return cleaned_array
+
+def plotRasterPDFComparison(DEMList:list,title:str='RasterPDF', ax_x_units:str='', bins:int = 100, addmax= False, show:bool=False, globalMax:int = 0, save:bool=True, savePath:str=''):
+    '''
+    # this create the kernel, given an array it will estimate the probability over that values
+    kde = gaussian_kde( data )
+    # these are the values over which your kernel will be evaluated
+    dist_space = linspace( min(data), max(data), 100 )
+    # plot the results
+    plt.plot( dist_space, kde(dist_space))
+    @DEMList:list,
+    @title:str='RasterPDF' 
+    @ax_x_units:str='' 
+    @bins:int = 100 
+    @addmax= False
+    @show:bool=False 
+    @globalMax:int = 0 
+    @save:bool=True 
+    @savePath:str=''
+    ''' 
+    global_Min = np.inf
+    global_Max = -np.inf
+    nameList = []
+
+     # Prepare plot
+    fig, ax = plt.subplots(1,sharey=True, tight_layout=True)
+
+    for dem in DEMList:
+        _,demName,_ = get_parenPath_name_ext(dem)
+        nameList.append
+        dem = replaceRastNoDataWithNan(dem,extraNoDataVal=-9999)
+        dataRechaped = np.reshape(dem,(-1))
+        data= remove_nan_vector(dataRechaped)
+        global_Min = np.minimum(global_Min, np.min(data))
+        global_Max = np.maximum(global_Max, np.max(data))
+
+        ## If <bins> is a list, add the maximum value to <bins>.  
+        if (addmax and isinstance(bins,list)):
+            bins.append(global_Max).astype(int)
+        
+        kde = gaussian_kde(data)
+        dist_space = linspace(global_Min, global_Max, 100 )
+        ax.plot(dist_space,kde(dist_space),alpha=0.6) 
+   
+    ax.legend(nameList, prop={'size': 8})
+    ax.set_title(title)
+    ax.set_xlabel(ax_x_units) 
+    ax.set_ylabel('Frequency')
+   
+    if isinstance(bins,list):
+        plt.xticks(bins)
+        print(bins)
+        plt.gca().set_xticklabels([str(i) for i in bins], minor = True)
+          
+    if save:
+        if not savePath:
+            savePath = os.path.join(os.getcwd(),title +'.png')
+            print(f'Figure: {title} saved to dir: {savePath}')
+        plt.savefig(savePath)
+    
+    if show:
+        plt.show()
 
