@@ -37,12 +37,16 @@ def runFunctionInLoop(csvList, function):
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     # chIn   # To check-in the wbtools license
-    # nameByTime = U.makeNameByTime()
+    nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # # runFunctionInLoop(csvList,DEMFeaturingForMLP_WbT)
-    DEM =[r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Quesnel_ok\BC_Quesnel_FullBasin_dem.tif', r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\BC_Salmo_2018_ok\BC_Salmo_FullBasin_clip.tif']
-    U.plotRasterPDFComparison(DEM,ax_x_units='m',save=False,show=True)
+
+    # U.listALLFilesInDirBySubstring_fullPath()
+    inRast = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\SK_Wolseley_Ok\cdsm-canada-dem-clip-3979-SK_Wolseley_FullBasin.tif'
+    mask = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\SK_Wolseley_Ok\SK_Wolseley_FullBasin.shp'
+    out = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\SK_Wolseley_Ok\SK_Wolseley_cdem.tif'
+    U.crop_tif(inRast,mask,out)
 
 
 if __name__ == "__main__":
@@ -62,3 +66,8 @@ if __name__ == "__main__":
     
     # for csv in csvTilesList:
     #     WbTransf.mosaikAndResamplingFromCSV(csv,8,'Ftp_dtm')
+
+    #####  Plot histogrames 
+    # csvTifList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mTif.csv'
+    # DEM = U.createListFromCSV(csvTifList)
+    # U.plotRasterPDFComparison(DEM,ax_x_units='m',save=False,show=True,title='Full Dataset Histogram of relative elevation')

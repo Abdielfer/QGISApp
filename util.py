@@ -199,14 +199,14 @@ def listALLFilesInDirByExt_fullPath(cwd, ext = '.csv'):
         fullList.extend(localList) 
     return fullList
 
-def listALLFilesInDirBySubstring_fullPath(cwd, ext = '.csv'):
+def listALLFilesInDirBySubstring_fullPath(cwd, substring = '.csv'):
     '''
     @substring: substring to be verify onto the file name.    NOTE:  THIS function list ALL files that are directly into <cwd> path and children folders. 
     '''
     fullList = []
     for (root, _, _) in os.walk(cwd):
         # print(f"Roots {root}")
-        localList = listFreeFilesInDirBySubstring_fullPath(root, ext)
+        localList = listFreeFilesInDirBySubstring_fullPath(root, substring)
         # print(f"Local List len :-->> {len(localList)}")
         fullList.extend(localList) 
     return fullList
@@ -485,7 +485,6 @@ def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
                 print('-----------------------Cropped --------------------  \n')
     print("All done --->")        
     return True
-
 
 def DEMFeaturingForMLP_WbT(DEM)-> list:
     '''
@@ -1580,13 +1579,13 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
     out = instantiate(dict_DcExtract)
     return out
 
-def multiple_dc_extract_ByPolygonBBox(cfg: DictConfig, csvPolygonList:os.path):
+def multiple_dc_extract_ByPolygonList(cfg: DictConfig):
     '''
     @cfg: DictConfig
     @csvPolygonList
     @Return: True if no error, otherwise dc_extraction tool errors report.
     '''
-    polygList = createListFromCSV(csvPolygonList)
+    polygList = createListFromCSV(cfg.dc_Extract_params['polygonListCSV'])
     for polyg in polygList:
         if os.path.exists(polyg):
             print(f"Currently working on -> {polyg}")
@@ -2218,9 +2217,9 @@ def remove_nan(array):
     cleaned_array = np.delete(array, nan_indices, axis=0)
     return cleaned_array
 
-def plotRasterPDFComparison(DEMList:list,title:str='RasterPDF', ax_x_units:str='', bins:int = 100, addmax= False, show:bool=False, globalMax:int = 0, save:bool=True, savePath:str=''):
+def plotRasterPDFComparison(DEMList:list,title:str='Raster PDF', ax_x_units:str='', bins:int = 100, addmax= False, show:bool=False, save:bool=False, savePath:str='', plotGlobal:bool=False):
     '''
-    # this create the kernel, given an array it will estimate the probability over that values
+    # this create the kernel, given an array, it will estimate the probability over that values
     kde = gaussian_kde( data )
     # these are the values over which your kernel will be evaluated
     dist_space = linspace( min(data), max(data), 100 )
@@ -2239,30 +2238,50 @@ def plotRasterPDFComparison(DEMList:list,title:str='RasterPDF', ax_x_units:str='
     global_Min = np.inf
     global_Max = -np.inf
     nameList = []
-
-     # Prepare plot
-    fig, ax = plt.subplots(1,sharey=True, tight_layout=True)
-
+    fullDataSet = np.array([], dtype=np.float32)
+    
+    ### Prepare plot
+    fig, ax = plt.subplots(1,sharey=True, sharex=True, tight_layout=True)
+    colors = plt.cm.jet(np.linspace(0, 1, 2*len(DEMList)+5))# 
+    '''
+    turbo; jet; nipy_spectral;gist_ncar;gist_rainbow;rainbow, brg
+    '''
+    colorIdx = 0
     for dem in DEMList:
         _,demName,_ = get_parenPath_name_ext(dem)
-        nameList.append
+        # if "Ottawa" in demName or 'Hamilton' in demName or "AL" in demName:
         dem = replaceRastNoDataWithNan(dem,extraNoDataVal=-9999)
         dataRechaped = np.reshape(dem,(-1))
         data= remove_nan_vector(dataRechaped)
         dataMin =  np.min(data)
-        dataMax = np.max(data)
+        relativeElevation = np.subtract(data,dataMin)
+        fullDataSet = np.concatenate((fullDataSet,relativeElevation))
+        print(f'FullDataset shape {fullDataSet.shape}')
+        print(f'data shape {relativeElevation.shape}')
+        dataMin =  np.min(relativeElevation)
+        dataMax = np.max(relativeElevation)
         global_Min = np.minimum(global_Min,dataMin)
         global_Max = np.maximum(global_Max,dataMax)
 
         ## If <bins> is a list, add the maximum value to <bins>.  
         if (addmax and isinstance(bins,list)):
             bins.append(global_Max).astype(int)
+        print(f'______________ {demName} ____________')
+        # nameList.append(demName)
+        # counts, bins = np.histogram(relativeElevation, bins= 200)
+        # bin_centers = 0.5 * (bins[:-1] + bins[1:])
+        # ax.plot(bin_centers, counts,color=colors[colorIdx],linewidth=0.8)
+        colorIdx+=2
         
-        kde = gaussian_kde(data)
-        dist_space = linspace(dataMin, dataMax, 100 )
-        ax.plot(dist_space,kde(dist_space),alpha=0.6) 
-   
-    ax.legend(nameList, prop={'size': 8})
+        
+    # ## Plot global PDF
+    counts, bins = np.histogram(fullDataSet, bins= 400)
+    bin_centers = 0.5 * (bins[:-1] + bins[1:])
+    ax.plot(bin_centers, counts,color='k',linewidth=0.9)
+    # nameList.append('Global histogram')
+    
+    ## Complet plot space
+    ax.legend(['Relative elevation'], prop={'size': 5})
     ax.set_title(title)
     ax.set_xlabel(ax_x_units) 
     ax.set_ylabel('Frequency')
@@ -2281,3 +2300,73 @@ def plotRasterPDFComparison(DEMList:list,title:str='RasterPDF', ax_x_units:str='
     if show:
         plt.show()
 
+
+
+def plotRasterPDF_AbsoluteFrequency(DEM:list,title:str='Raster PDF', ax_x_units:str='', bins:int = 100, addmax= False, show:bool=True, save:bool=False, savePath:str=''):
+    '''
+    # this create the kernel, given an array, it will estimate the probability over that values
+    kde = gaussian_kde( data )
+    # these are the values over which your kernel will be evaluated
+    dist_space = linspace( min(data), max(data), 100 )
+    # plot the results
+    plt.plot( dist_space, kde(dist_space))
+    @DEM : DEM path
+    @title:str='RasterPDF' 
+    @ax_x_units:str='' 
+    @bins:int = 100 
+    @addmax= False
+    @show:bool=False 
+    @globalMax:int = 0 
+    @save:bool=True 
+    @savePath:str=''
+    ''' 
+    # Import DEM
+    _,demName,_ = get_parenPath_name_ext(DEM)
+    print(f'______________ {demName} ____________')
+    dem = replaceRastNoDataWithNan(DEM,extraNoDataVal=-9999)
+    dataRechaped = np.reshape(dem,(-1))
+    data= remove_nan_vector(dataRechaped)
+     # Prepare plot
+    fig, ax = plt.subplots(1,sharey=True, tight_layout=True)
+    counts, bins = np.histogram(data, bins= 100)
+    bin_centers = 0.5 * (bins[:-1] + bins[1:])
+    ax.plot(bin_centers, counts)
+    ax.legend(demName, prop={'size': 8})
+    ax.set_title(title)
+    ax.set_xlabel(ax_x_units) 
+    ax.set_ylabel('Frequency')
+    if isinstance(bins,list):
+        plt.xticks(bins)
+        print(bins)
+        plt.gca().set_xticklabels([str(i) for i in bins], minor = True)
+          
+    if save:
+        if not savePath:
+            savePath = os.path.join(os.getcwd(),title +'.png')
+            print(f'Figure: {title} saved to dir: {savePath}')
+        plt.savefig(savePath)
+    
+    if show:
+        plt.show()
+
+
+
+
+######    NOTES   #####
+'''
+list of the built-in color maps in Matplotlib:
+
+**Perceptually Uniform Sequential**: `viridis`, `plasma`, `inferno`, `magma`, `cividis`
+
+**Sequential**: `Greys`, `Purples`, `Blues`, `Greens`, `Oranges`, `Reds`, `YlOrBr`, `YlOrRd`, `OrRd`, `PuRd`, `RdPu`, `BuPu`, `GnBu`, `PuBu`, `YlGnBu`, `PuBuGn`, `BuGn`, and `YlGn`
+
+**Sequential (2)**: `binary`, `gist_yarg`, `gist_gray`, `gray`, `bone`, `pink`, `spring`, `summer`, `autumn`, `winter`, `cool`, `Wistia`, `hot`, `afmhot`,`gist_heat`,`copper`
+
+**Diverging**:  `PiYG`,`PRGn`,`BrBG`,`PuOr`,`RdGy`,`RdBu`,`RdYlBu`,`RdYlGn`,`Spectral`,`coolwarm`,`bwr`,`seismic`
+
+**Cyclic**:  `twilight`,`twilight_shifted`,`hsv`
+
+**Qualitative**:  `Pastel1`,`Pastel2`,`Paired`,`Accent`,`Dark2`,`Set1`,`Set2`,`Set3`,`tab10`,`tab20`,`tab20b`,`tab20c`
+
+
+'''

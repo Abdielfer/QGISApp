@@ -42,5 +42,4 @@ dc_describeCollections:
 #________________________________________________________________
 # Values that can be shared by all functions:
 date_time : None  # datetime_str_in_ISO_8601_with_Z. (ex. str --> '2011-08-12T20:17:46.384Z') Optional defaults to None. 
-bbox : '-71.55,46.74,-71.18,47.1'
- 
+polygonListCSV : 'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsPolygonsShp.csv'
