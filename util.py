@@ -20,6 +20,7 @@ from torchgeo.datasets.utils import download_url
 from osgeo import gdal,ogr, osr
 from osgeo import gdal_array
 from osgeo.gdalconst import *
+import geopandas as gpd
 gdal.UseExceptions()
 
 import pcraster as pcr
@@ -172,7 +173,7 @@ def listFreeFilesInDirBySubstring_fullPath(cwd:str, substring = '') -> list:
     file_list = []
     for (root,_, file) in os.walk(cwd, followlinks=True):
         for f in file:
-            if substring in f:
+            if substring.lower() in f.lower():
                 file_list.append(os.path.join(root,f))
     return file_list
 
@@ -269,6 +270,10 @@ def createShpList(parentDir)-> os.path:
     OutCSVPath = os.path.join(parentDir,'listOfShpFiles.csv')
     createCSVFromList(OutCSVPath,listOfPath)
     return OutCSVPath 
+
+def remove_duplicates_ordered(input_list)->list:
+    seen = set()
+    return [x for x in input_list if not (x in seen or seen.add(x))]
 
 def replaceExtention(inPath,newExt: str)->os.path :
     '''
@@ -486,74 +491,9 @@ def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
     print("All done --->")        
     return True
 
-def DEMFeaturingForMLP_WbT(DEM)-> list:
-    '''
-    The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools library. All output adress are managed into the class WbT_DEM_FeatureExtraction(). Also the WbT_working directory is setted at the same parent dir of the input DEM. 
-    The steps are (See function description formmore details.):
-    1- DEM correction <fixNoDataAndfillDTM()>
-    2- Slope <computeSlope()>
-    3- Compute flow direction <D8_pointe()>
-    4- Compute Flow accumulation <DInfFlowAcc()>
-    5- Extract stream.
-    6- Compute stream order with Strahler Order.
-    7- Compute HAND.
-    8- Compute distance to stream.
-
-    @DEM: Deigital elevation mode raster.
-    @Return: A list of some produced maps. The maps to be added to a multiband *.tif.
-    
-    NOTE: Also save a list of produced features in a csv file for further automation process. 
-    '''
-    outList = [DEM]
-    DEM_Features = WbT_DEM_FeatureExtraction(DEM)
-    print(f"Extracting features from DEM >>>>")
-    ## Geomorphons
-    geomorph = DEM_Features.wbT_geomorphons()
-    replace_no_data_value(geomorph)
-    outList.append(geomorph)
-    print(f"-------------Geomorphons ready at {geomorph}")
-    ## Flood Order
-    FloodOrd = DEM_Features.FloodOrder()
-    replace_no_data_value(FloodOrd)
-    outList.append(FloodOrd)
-    print(f"-------------Flood Order ready at {FloodOrd}")
-    ## DEM Filling
-    DEM_Features.fixNoDataAndfillDTM()
-    print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
-    ## Slope
-    slope = DEM_Features.computeSlope()
-    outList.append(slope)
-    print(f"-------------Slope ready at {slope}")
-    ## Flow direction
-    D8Pointer = DEM_Features.d8_Pointer() 
-    print(f"-------------Flow direction ready at {D8Pointer}")
-    FAcc = DEM_Features.d8_flow_accumulation()
-    replace_no_data_value(FAcc)
-    outList.append(FAcc)
-    print(f"-------------Flow accumulation ready at {FAcc}")
-    stream = DEM_Features.extract_stream(FAcc)
-    print(f"-------------Stream ready at {stream}")
-    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
-    print(f"-------------Strahler Order ready at {strahlerOrder}")
-    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
-    print(f"-------------Main river ready at {mainRiver}")
-    HAND = DEM_Features.WbT_HAND(mainRiver)
-    outList.append(HAND)
-    print(f"-------------HAND index ready at {HAND}")
-    proximity = computeProximity(mainRiver)
-    outList.append(proximity)
-    print(f"-------------Proximity index ready at {proximity}")
-    ## Catchment extraction
-    DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
-    ### Save the list of features path as csv. 
-    csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
-    createCSVFromList(csvPath,outList)
-    print(f"--------Features done!----------")
-    return outList  
-
 def fromDEMtoDataFrame(DEM,labels,target:str='percentage',mask:os.path=None)->pd.DataFrame:
     '''
-    Testing the process of sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
+    Sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
     '''
     ## Create features for dataset
     bandsList = DEMFeaturingForMLP_WbT(DEM)
@@ -574,11 +514,9 @@ def fromDEMtoDataFrame(DEM,labels,target:str='percentage',mask:os.path=None)->pd
     df = pd.DataFrame(samplesArr,columns=colList)
     ## Extract coordinates columns to sample from label. 
     xyList = samplesArr[:,0:2]
-    labesColumn = []
-    for i in range(0, xyList.shape[0]):
-        labesColumn.append(getFieldValueFromPolygon(labels,target,xyList[i,0],xyList[i,1]))
-    ## Add labels to the DataFrame
-    df['target'] = labesColumn
+    content, nameList = sample_shapefile(labels,target,xyList)
+    for name in nameList:
+       df[name] = content[:,nameList.index(name)]
     ## Saving DataFrame as csv
     scv_output = replaceExtention(rasterMultiband,'_DataFrame.csv')
     df.to_csv(scv_output,index=None)
@@ -798,6 +736,26 @@ def getRasterSampleFromPoint(raster,xy):
         data = src.read()
         bandsArray = data[:, x, y]
     return bandsArray
+
+def transformShp_IDValue(shpFile, targetField, baseField):
+# Open the shapefile
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    shapefile = driver.Open(shpFile, 1)  # 1 means open in update mode
+    # Get the layer
+    layer = shapefile.GetLayer()
+    # Iterate over each feature in the layer
+    for feature in layer:
+        # Get the value of the field you want to base your changes on
+        base_value = feature.GetField(baseField)
+        # Determine the <new_value> based on the <base_value>
+        # This is where you put your transformation logic
+        new_value = str(base_value)  # replace this with your transformation function
+        # Set and Update the value of the Layer's field.
+        feature.SetField(targetField, new_value)
+        layer.SetFeature(feature)
+
+    # Close the shapefile
+    shapefile = None
 
 ###########################
 ####   PCRaster Tools  ####
@@ -1385,7 +1343,7 @@ def getNeighborsGDAL(raster_file, shape_file):
 
     return output_array
 
-def samplingTwoFaster(raster1_path, raster2_path) -> np.array:
+def fullSamplingTwoFasterForComparison(raster1_path, raster2_path) -> np.array:
     '''
     This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value  raster one, Z_value raster two]. 
     The first input raster is used as a reference. 
@@ -1528,7 +1486,7 @@ def randomSamplingTwoRaster(raster1_path, raster2_path, num_samples) -> np.array
 
     return samples
 
-def getFieldValueFromPolygon(vector_path, field_name, x, y):
+def getFieldValueFromPolygon(vector_path, field_name, x, y)->list:
     # Open the vector file
     vector = ogr.Open(vector_path)
     layer = vector.GetLayer()
@@ -1543,9 +1501,75 @@ def getFieldValueFromPolygon(vector_path, field_name, x, y):
         values.append(feature.GetField(field_name))
     # Return the first value if there is at least one intersecting feature
     if values:
-        return values[0]
+        return values
     else:
-        return 0
+        return []
+
+def getFieldValueFromPolygonLayer(layer:ogr.Layer, field_name, x,y)->list:
+    # Create a point geometry for the given coordinate pair
+    point = ogr.Geometry(ogr.wkbPoint)
+    point.AddPoint(x,y)
+    # Set up a spatial filter to select features that intersect with the point
+    layer.SetSpatialFilter(point)
+    # Get the value of the specified field for each intersecting feature
+    values = []
+    for feature in layer:
+        values.append(feature.GetField(field_name))
+    # Return the first value if there is at least one intersecting feature
+    if values:
+        return values
+    else:
+        return []
+
+def getRasterValueByCoord(raster1_path, xy) -> np.array:
+    '''
+    This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value rather one, Z_value rather two]. 
+    The first input raster is used as a reference. 
+    The two rasters are assumed to be in the same CRS but not necessarily with the same resolution. 
+    The algorithm samples the centre of all pixels using the upper-left corner of the first raster as a reference.
+    When you read a raster with GDAL, the raster transformation is represented by a <geotransform>. The geotransform is a six-element tuple that describes the relationship between pixel coordinates and georeferenced coordinates ⁴. The elements of the geotransform are as follows:
+    
+    RASTER Transformation content 
+    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
+    0. x-coordinate of the upper-left corner of the raster
+    1. width of a pixel in the x-direction
+    2. rotation, which is zero for north-up images
+    3. y-coordinate of the upper-left corner of the raster
+    4. rotation, which is zero for north-up images
+    5. height of a pixel in the y-direction (usually negative)
+
+    The geotransform to convert between pixel coordinates and georeferenced coordinates using the following equations:
+
+    x_geo = geotransform[0] + x_pixel * geotransform[1] + y_line * geotransform[2]
+    y_geo = geotransform[3] + x_pixel * geotransform[4] + y_line * geotransform[5]
+
+    `x_pixel` and `y_line` : pixel coordinates of a point in the raster, 
+    `x_geo` and `y_geo` : corresponding georeferenced coordinates.
+
+    In addition, to extract the value in the centre of the pixels, we add 1/2 of width and height respectively.
+    x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+    y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
+
+    '''    
+    
+    # Get the shape of the rasters
+    # Open raster and get its metadata
+    raster1 = gdal.Open(raster1_path)
+    raster1_band = raster1.GetRasterBand(1)
+    # Create an empty array to store the samples
+    rows = xy.shape[0]
+    samples = np.zeros([rows,1])
+    # Loop through the number of samples
+    idx = 0
+    for x,y in xy:
+        # Extract the values from the two rasters at the selected coordinates
+        value1 = raster1_band.ReadAsArray(x, y, 1, 1)[0][0]
+        # Check if neither value is : NoData OR NaN):
+            # Add the values to the samples array
+        samples[idx] = [value1]
+        idx+=1    
+    return samples
+
 
 ############################
 #### Datacube_ Extract  ####
@@ -2185,6 +2209,76 @@ class generalRasterTools():
     def setWBTWorkingDir(self, workingDir):
         wbt.set_working_dir(workingDir)
 
+def DEMFeaturingForMLP_WbT(DEM)-> list:
+    '''
+    The goal of this function is to compute all necesary(or desired) maps for MLP classification inputs, starting from a DEM. The function use WhiteboxTools library. All output adress are managed into the class WbT_DEM_FeatureExtraction(). Also the WbT_working directory is setted at the same parent dir of the input DEM. 
+    The steps are (See function description formmore details.):
+    1- DEM correction <fixNoDataAndfillDTM()>
+    2- Compute geomorphons in DEM
+    3- Compute Flood Order in DEM
+    4- Fill DEM with wang_and_liu method
+    5- Slope in corrected DEM
+    6- Compute flow direction <D8_pointe()>
+    7- Compute Flow accumulation <DInfFlowAcc()>
+    8- Extract stream.
+    9- Compute stream order with Strahler Order.
+    10- Extract main stream.
+    11- Compute HAND.
+    12 -Compute subcatchment with <watershedHillslopes>
+    13- Compute distance to stream.(Proximity)
+
+    @DEM: Digital elevation mode raster.
+    @Return: A list of some produced maps. The maps to be added to a multiband *.tif.
+    
+    NOTE: Also save a list of produced features in a csv file for further automation process. 
+    '''
+    outList = [DEM]
+    DEM_Features = WbT_DEM_FeatureExtraction(DEM)
+    print(f"Extracting features from DEM >>>>")
+    ## Geomorphons
+    geomorph = DEM_Features.wbT_geomorphons()
+    replace_no_data_value(geomorph)
+    outList.append(geomorph)
+    print(f"-------------Geomorphons ready at {geomorph}")
+    ## Flood Order
+    FloodOrd = DEM_Features.FloodOrder()
+    replace_no_data_value(FloodOrd)
+    outList.append(FloodOrd)
+    print(f"-------------Flood Order ready at {FloodOrd}")
+    ## DEM Filling
+    DEM_Features.fixNoDataAndfillDTM()
+    print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
+    ## Slope
+    slope = DEM_Features.computeSlope()
+    outList.append(slope)
+    print(f"-------------Slope ready at {slope}")
+    ## Flow direction
+    D8Pointer = DEM_Features.d8_Pointer() 
+    print(f"-------------Flow direction ready at {D8Pointer}")
+    FAcc = DEM_Features.d8_flow_accumulation()
+    replace_no_data_value(FAcc)
+    outList.append(FAcc)
+    print(f"-------------Flow accumulation ready at {FAcc}")
+    stream = DEM_Features.extract_stream(FAcc)
+    print(f"-------------Stream ready at {stream}")
+    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
+    print(f"-------------Strahler Order ready at {strahlerOrder}")
+    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
+    print(f"-------------Main river ready at {mainRiver}")
+    HAND = DEM_Features.WbT_HAND(mainRiver)
+    outList.append(HAND)
+    print(f"-------------HAND index ready at {HAND}")
+    proximity = computeProximity(mainRiver)
+    outList.append(proximity)
+    print(f"-------------Proximity index ready at {proximity}")
+    ## Catchment extraction
+    DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
+    ### Save the list of features path as csv. 
+    csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
+    createCSVFromList(csvPath,outList)
+    print(f"--------Features done!----------")
+    return outList  
+
 # Helpers
 def checkTifExtention(fileName):
     if ".tif" not in fileName:
@@ -2204,7 +2298,7 @@ def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
     print(f"Tails downloaded to: {confirmedLocalPath}")
 
 ##################################################################
-########  DATA Analis tools gor Geo Spatial information   ########
+########  DATA Analis tools for Geo Spatial information   ########
 ##################################################################
 
 def remove_nan_vector(array):
@@ -2300,56 +2394,47 @@ def plotRasterPDFComparison(DEMList:list,title:str='Raster PDF', ax_x_units:str=
     if show:
         plt.show()
 
-
-
-def plotRasterPDF_AbsoluteFrequency(DEM:list,title:str='Raster PDF', ax_x_units:str='', bins:int = 100, addmax= False, show:bool=True, save:bool=False, savePath:str=''):
+def addCollFromRasterToDataFrame(df_In,map, colName:str='')->pd.DataFrame:
     '''
-    # this create the kernel, given an array, it will estimate the probability over that values
-    kde = gaussian_kde( data )
-    # these are the values over which your kernel will be evaluated
-    dist_space = linspace( min(data), max(data), 100 )
-    # plot the results
-    plt.plot( dist_space, kde(dist_space))
-    @DEM : DEM path
-    @title:str='RasterPDF' 
-    @ax_x_units:str='' 
-    @bins:int = 100 
-    @addmax= False
-    @show:bool=False 
-    @globalMax:int = 0 
-    @save:bool=True 
-    @savePath:str=''
-    ''' 
-    # Import DEM
-    _,demName,_ = get_parenPath_name_ext(DEM)
-    print(f'______________ {demName} ____________')
-    dem = replaceRastNoDataWithNan(DEM,extraNoDataVal=-9999)
-    dataRechaped = np.reshape(dem,(-1))
-    data= remove_nan_vector(dataRechaped)
-     # Prepare plot
-    fig, ax = plt.subplots(1,sharey=True, tight_layout=True)
-    counts, bins = np.histogram(data, bins= 100)
-    bin_centers = 0.5 * (bins[:-1] + bins[1:])
-    ax.plot(bin_centers, counts)
-    ax.legend(demName, prop={'size': 8})
-    ax.set_title(title)
-    ax.set_xlabel(ax_x_units) 
-    ax.set_ylabel('Frequency')
-    if isinstance(bins,list):
-        plt.xticks(bins)
-        print(bins)
-        plt.gca().set_xticklabels([str(i) for i in bins], minor = True)
-          
-    if save:
-        if not savePath:
-            savePath = os.path.join(os.getcwd(),title +'.png')
-            print(f'Figure: {title} saved to dir: {savePath}')
-        plt.savefig(savePath)
+    Add a column to a dataset, sampling from a raster at the points defined in the x_coord and y_coord of the input dataframe.
+    @df_In: pandas DataFrame with the two first colums being: x_coord,y_coord.
+    @map: Raster map. Raster map expected to have only one layer. 
+    @colName: Name to asigne to the new column.If empty, the new column will be the map prefix. 
+    @return: A dataframe with a column containing the sampling from <map>. 
+    '''
+    xyCols = df_In.iloc[:, :2].values
+    newColValues = getRasterSampleFromPoint(map,xyCols)
+    df_out = df_In.copy() 
+    if colName:
+        df_out[colName]=newColValues
+    else:
+        _,tifName,_ = get_parenPath_name_ext(map)
+        colName = tifName.split("_")[-1]
+        df_out[colName]=newColValues
+    return df_out
+
+def addCollFromVectorFieldToDataFrame(df_In,vector, field, colName:str='')->pd.DataFrame:
+    '''
+    Add a column to a dataset, sampling from a raster at the points defined in the x_coord and y_coord of the input dataframe.
+    @df_In: pandas DataFrame with the two first colums being: x_coord,y_coord.
+    @map: Raster map. Raster map expected to have only one layer. 
+    @colName: Name to asigne to the new column.If empty, the new column will be the map prefix. 
+    @return: A dataframe with a column containing the sampling from <map>. 
+    '''
+    xyCols = df_In.iloc[:, :2].values
+    vector = ogr.Open(vector_path)
+    layer = vector.GetLayer()
+    newColValues = getFieldValueFromPolygon(vector,field,xyCols)
+    df_out = df_In.copy() 
     
-    if show:
-        plt.show()
-
-
+    
+    if colName:
+        df_out[colName]=newColValues
+    else:
+        _,tifName,_ = get_parenPath_name_ext(map)
+        colName = tifName.split("_")[-1]
+        df_out[colName]=newColValues
+    return df_out
 
 
 ######    NOTES   #####
@@ -2370,3 +2455,50 @@ list of the built-in color maps in Matplotlib:
 
 
 '''
+
+def read_shapefile(gdf:gpd.GeoDataFrame, field_name, x, y)-> [np.array,list]:
+    '''
+    ## To read the shapefile into a geopandas dataframe
+    gdf = gpd.read_file(file_path)
+    '''
+    # extract the feature values from the dataframe
+    feature_values = gdf.loc[(gdf.geometry.x == x) & (gdf.geometry.y == y), field_name].values
+    # return the feature values as an array
+    return feature_values
+
+def sample_shapefile(shapefile_path, field_name, coordinates):
+    # Open the shapefile
+    shapefile = ogr.Open(shapefile_path)
+    layer = shapefile.GetLayer()
+    featureCount = layer.GetFeatureCount()
+    featuresID = []
+    ### Collect features IDs from the shpfile. 
+    for i in range(featureCount):
+        feature = layer.GetFeature(i)
+        next_ID = str(int(feature.GetField(field_name)))
+        print(f'Feature ID {next_ID}')
+        if next_ID not in featuresID:
+            featuresID.append(next_ID)
+    
+    # Create an empty array to store the values
+    values = np.zeros((coordinates.shape[0],featureCount))
+    print(f'Output array shape {values.shape}')
+    # Iterate over each pair of coordinates
+    row = 0
+    for x, y in coordinates:
+        # Create a point
+        point = ogr.Geometry(ogr.wkbPoint)
+        point.AddPoint(x, y)
+        layer.SetSpatialFilter(point)
+        # Iterate over each feature in the shapefile
+        # values = getFieldValueFromPolygon(shapefile_path,field_name,x,y)
+        # if len(values)>0:
+        #     print(x,y)
+        #     print(values)
+        for feature in layer:
+            fid = str(int(feature.GetField(field_name)))
+            values[row,featuresID.index(fid)] = feature.GetField(field_name)
+            print(f'x->{x}, y->{y}, fid -> {fid}, value -> {feature.GetField(field_name)}')
+        point = None
+        row +=1
+    return values,featuresID
