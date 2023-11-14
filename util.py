@@ -2466,7 +2466,17 @@ def read_shapefile(gdf:gpd.GeoDataFrame, field_name, x, y)-> [np.array,list]:
     # return the feature values as an array
     return feature_values
 
-def sample_shapefile(shapefile_path, field_name, coordinates):
+def sampleUniqueValByField_shpfile(shapefile_path, field_name:str, coordinates)->[np.ndarray,list]:
+    '''
+    Sample a shapefile from a list of <coordinates> and return: a column per unique value in the <field_name> and a list of unique values as string.
+    NOTE: The function have been created to sample flood labels polygons by classes for the flood modeling project. 
+    @shapefile_path: os.path: Path to the shapefile
+    @field_name: str: name of the field of interest in the shapefile. MUST be a unique fiel, DO NOT accept list for now. 
+    @coordinates: np.array: array of shape (n,2), with n pairs like <x_coord,y_coord>.
+    @Return: 
+        values: ndarray: Array of shape (n,NumberOFUniqueValues).
+        featuresID: list: list of unique values in the <field_name>. 
+    '''
     # Open the shapefile
     shapefile = ogr.Open(shapefile_path)
     layer = shapefile.GetLayer()
@@ -2491,14 +2501,34 @@ def sample_shapefile(shapefile_path, field_name, coordinates):
         point.AddPoint(x, y)
         layer.SetSpatialFilter(point)
         # Iterate over each feature in the shapefile
-        # values = getFieldValueFromPolygon(shapefile_path,field_name,x,y)
-        # if len(values)>0:
-        #     print(x,y)
-        #     print(values)
         for feature in layer:
             fid = str(int(feature.GetField(field_name)))
             values[row,featuresID.index(fid)] = feature.GetField(field_name)
-            print(f'x->{x}, y->{y}, fid -> {fid}, value -> {feature.GetField(field_name)}')
+            # print(f'x->{x}, y->{y}, fid -> {fid}, value -> {feature.GetField(field_name)}')
         point = None
         row +=1
     return values,featuresID
+
+def addTargetColsToDataFrameCSV(df_csv,shpFile,target:str ='percentage', excludeClass:list=['0']):
+    '''
+    This function add to a dataset the Target columns. The dataset is provided as *.csv file and save to the same path a new file with perfix = "_withClasses.csv"
+    @df_csv: os.path: Path to the *csv file.
+    @shpFile: os.path: Path to the shapefile to sample from.
+    @target:str = target coll name in the dataset.
+    @return: os.path: path to the new *csv containing the dataset. 
+    '''
+    # Read the csv as pd.DataFrame
+    df = pd.read_csv(df_csv)
+    # df.drop('0', axis=1, inplace=True)
+    ## Extract x,y pairs array.
+    xy = df.iloc[:,:2].values
+    # Sample unique values by coordinates
+    array, nameList = sampleUniqueValByField_shpfile(shpFile,target,xy)
+    # Add colls to the dataframe and save it.
+    for name in nameList:
+        if name not in excludeClass: 
+            df[name] = array[:,nameList.index(name)]
+    saveTo = addSubstringToName(df_csv,"_withClasses")
+    print(df.head)
+    df.to_csv(saveTo,index=None)
+    return saveTo 
