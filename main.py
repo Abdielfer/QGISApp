@@ -35,29 +35,41 @@ def runFunctionInLoop(csvList, function):
         else:
             print(f"Path not found -> {path}")
 
+def customFunction(csvList):
+    pathList =  U.createListFromCSV(csvList, delim=';')
+    for i in pathList:
+        dem = i[1]
+        print('_____________________ New Datase __________________')
+        print(f'cdem: {dem}')
+        labels = i[0]
+        print(f'labels: {labels}')
+        samplingArea = i[2]
+        print(f'samplingArea: {samplingArea}')
+        U.fromDEMtoDataFrame(dem,labels,mask=samplingArea, samplingRatio=0.3)
+    return 
+
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
     # chIn   # To check-in the wbtools license
-    nameByTime = U.makeNameByTime()
+    # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-    # # runFunctionInLoop(csvList,DEMFeaturingForMLP_WbT)
-    # csvist = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\allfloodlabel.csv'
-    # floodLabelsList = U.createListFromCSV(csvist)
-    # dem = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem.tif'
-    # labels = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/AL_Lethbridge_ok/AL_Lethbridge_floodLabels.shp'
-    # samplingArea = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/AL_Lethbridge_ok/AL_Lethbridge_SamplingArea.shp'
-    # U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
+    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
+    # customFunction(csvList)
+    # tif = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem_fill_hillslope.tif'
+    # watersheds = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_watershed.shp'
+    # U.raster_max_by_polygons(tif,watersheds)
 
-    shpFile = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_floodLabels3979.shp'
-    df_csv = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem_features_DataFrame.csv'
-    U.addTargetColsToDataFrameCSV(df_csv,shpFile,"percentage")
+
+    # U.overwriteShapefileProjection(out_shp)
+    # configFile = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\config\mainConfigPC.yaml'
+    # newParams = {'normalizers': '[100,22,53]'}
+    # U.overWriteHydraConfig(configFile,newParams)
 
 if __name__ == "__main__":
     with U.timeit():
         main()  
-
 
 #####   Block to write into main.py to performe automated tasks 
 

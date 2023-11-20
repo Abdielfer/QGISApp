@@ -1,13 +1,11 @@
-
-defaults:
-  - dc_Extract_params : dc_extractParamsCanvas  #Define which config to call. 
-  - transformation : rasterTools # Define which raster transformations tools to call
-  - _self_
-
-work_dir: ${hydra:runtime.cwd}  # where the code is executed
 config_name: ${hydra:job.config_name}
 config_override_dirname: ${hydra:job.override_dirname}
 config_path: ${hydra:runtime.config_sources}
-# projectRoot: C:\Users\abfernan\CrossCanFloodMapping\DL4Flood
-saveModelsPath: ${hydra:runtime.cwd} 
-output_dir : C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output  # No need for last slash
+defaults:
+- dc_Extract_params: dc_extractParamsCanvas
+- transformation: rasterTools
+- _self_
+normalizers: '[100,22,53]'
+output_dir: C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output
+saveModelsPath: ${hydra:runtime.cwd}
+work_dir: ${hydra:runtime.cwd}

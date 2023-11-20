@@ -17,4 +17,4 @@ dependencies:
   - whitebox_tools
   - qgis
   - PCRaster
-
+  - pyyaml

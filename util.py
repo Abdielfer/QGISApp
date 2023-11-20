@@ -22,6 +22,8 @@ from osgeo import gdal_array
 from osgeo.gdalconst import *
 import geopandas as gpd
 gdal.UseExceptions()
+import yaml
+
 
 import pcraster as pcr
 from pcraster import *
@@ -200,7 +202,7 @@ def listALLFilesInDirByExt_fullPath(cwd, ext = '.csv'):
         fullList.extend(localList) 
     return fullList
 
-def listALLFilesInDirBySubstring_fullPath(cwd, substring = '.csv'):
+def listALLFilesInDirBySubstring_fullPath(cwd, substring = '.csv')->list:
     '''
     @substring: substring to be verify onto the file name.    NOTE:  THIS function list ALL files that are directly into <cwd> path and children folders. 
     '''
@@ -221,8 +223,25 @@ def createListFromCSV(csv_file_location, delim:str =','):
     df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
     out = []
     for i in range(0,df.shape[0]):
-        out.append(df.iloc[i,:].tolist()[0])     
+        out.append(df.iloc[i,:].tolist())     
     return out
+
+def createCSVFromList(pathToSave: os.path, listData:list):
+    '''
+    This function create a *.csv file with one line per <lstData> element. 
+    @pathToSave: path of *.csv file to be writed with name and extention.
+    @listData: list to be writed. 
+    '''
+    parentPath,name,_ = get_parenPath_name_ext(pathToSave)
+    textPath = makePath(parentPath,(name+'.csv'))
+    with open(textPath, 'w') as output:
+        for line in listData:
+            output.write(str(line) + '\n')
+    # read_file = pd.read_csv (textPath)
+    # print(f'Creating CSV at {pathToSave}')
+    # read_file.to_csv (pathToSave, index=None)
+    # removeFile(textPath)
+    return True
 
 def createListFromCSVColumn(csv_file_location, col_idx, delim:str =','):  
     '''
@@ -315,23 +334,26 @@ def replaceName_KeepPathAndExt(path, newName: str) -> os.path:
     '''
     parentPath,_,ext= get_parenPath_name_ext(path)
     return os.path.join(parentPath,(newName+ext))
+
+def overWriteHydraConfig(hydraYML, newParams) -> bool:
+    with open(hydraYML, 'r') as f:
+        data = yaml.safe_load(f)
+
+    # Add new parameter
+    for key, value in newParams.items():
+        data[key] = value
+
+    # Write data back to the file
+    try:
+        with open(hydraYML, 'w') as f:
+            yaml.safe_dump(data, f)
+            print("File written successfully")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return False
     
-def createCSVFromList(pathToSave: os.path, listData:list):
-    '''
-    This function create a *.csv file with one line per <lstData> element. 
-    @pathToSave: path of *.csv file to be writed with name and extention.
-    @listData: list to be writed. 
-    '''
-    parentPath,name,_ = get_parenPath_name_ext(pathToSave)
-    textPath = makePath(parentPath,(name+'.txt'))
-    with open(textPath, 'w') as output:
-        for line in listData:
-            output.write(str(line) + '\n')
-    read_file = pd.read_csv (textPath)
-    print(f'Creating CSV at {pathToSave}')
-    read_file.to_csv (pathToSave, index=None)
-    removeFile(textPath)
     return True
+
 
 def updateDict(dic:dict, args:dict)->dict:
     outDic = dic
@@ -368,6 +390,8 @@ def isCoordPairInArray(arr, pair) ->bool:
     x, y = pair
     out = np.any(arr[np.where(arr[:,0]==x),1] == y)
     return out
+
+
 
 ###################            
 ### General GIS ###
@@ -491,7 +515,7 @@ def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
     print("All done --->")        
     return True
 
-def fromDEMtoDataFrame(DEM,labels,target:str='percentage',mask:os.path=None)->pd.DataFrame:
+def fromDEMtoDataFrame(DEM:os.path,labels:os.path,target:str='percentage',mask:os.path=None, samplingRatio:float=0.1)->os.path:
     '''
     Sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
     '''
@@ -505,22 +529,19 @@ def fromDEMtoDataFrame(DEM,labels,target:str='percentage',mask:os.path=None)->pd
     ## Crop the multiband raster if needed.
     if mask:
         cropped = addSubstringToName(rasterMultiband,'_AOI')
-        raster = crop_tif(rasterMultiband,mask,cropped)
+        raster = clipRasterByMask(rasterMultiband,mask,cropped)
+        replace_no_data_value(raster)
     else:
         raster = rasterMultiband
     ## Random sampling the raster with a density defined by the ratio. This is the more expensive opperation..by patient. 
-    samplesArr = randomSamplingMultiBandRaster(raster,ratio=0.0001)
+    samplesArr = randomSamplingMultiBandRaster(raster,ratio=samplingRatio)
     ## Build a dataframe with the samples
     df = pd.DataFrame(samplesArr,columns=colList)
-    ## Extract coordinates columns to sample from label. 
-    xyList = samplesArr[:,0:2]
-    content, nameList = sample_shapefile(labels,target,xyList)
-    for name in nameList:
-       df[name] = content[:,nameList.index(name)]
-    ## Saving DataFrame as csv
-    scv_output = replaceExtention(rasterMultiband,'_DataFrame.csv')
+    scv_output = replaceExtention(rasterMultiband,'_DSet.csv')
     df.to_csv(scv_output,index=None)
-    return df
+    print(f'Buscando a Target in fromDEMtoDataFrame: {target}')
+    addTargetColsToDatasetCSV(scv_output,labels,target)
+    return scv_output
 
 #######################
 ### Rasterio Tools  ###
@@ -692,7 +713,7 @@ def randomSamplingMultiBandRaster(rasterIn,ratio:float=1)-> np.array:
     The samples are ONLY VALID points according the criteria of been not NODataValue. (bandsArray[0]!= NoData and bandsArray[0] != np.NAN)
     The samples are not repeated coordinates pairs.
     @rasterIn: the path to the input raster.
-    @ratio: the proportion of existing pixels in the <rasterIn> to be sampled. 
+    @ratio: float (0 to 1): the percentage of existing pixels in the <rasterIn> to be sampled (1=full raster, 0=No samples). 
     @return: np.array with a series of samplin points.
     '''
     sampleCont =0    
@@ -714,7 +735,7 @@ def randomSamplingMultiBandRaster(rasterIn,ratio:float=1)-> np.array:
             ## Extract banda values as vector
             bandsArray = data[:, i, j]
             # Check if neither value is NoData OR NaN in the first band (DEM)
-            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN) and not isCoordPairInArray(arrayDataset,xy):
+            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN and bandsArray[0] != 0) and not isCoordPairInArray(arrayDataset,xy):
                 # Add the sample to the dataset
                 arrayDataset[sampleCont] = np.concatenate((xy, bandsArray))
                 sampleCont+=1
@@ -756,6 +777,7 @@ def transformShp_IDValue(shpFile, targetField, baseField):
 
     # Close the shapefile
     shapefile = None
+
 
 ###########################
 ####   PCRaster Tools  ####
@@ -1023,7 +1045,7 @@ def replace_no_data_value(dataset_path, new_value:float = -9999):
         band.WriteArray(band_array)
         band.SetNoDataValue(new_value)
     dataset.FlushCache()
-
+    
 def translateToTiff(inPath) -> bool:
     """
     Write a *tif raster from an appropriate(GDAL accepted formats) raster input. The function return a raster with the same characteristic,
@@ -1063,7 +1085,7 @@ def translateToPCRaster(inputPath) -> str:
 def readRasterAsArry(rasterPath):
    return gdal_array.LoadFile(rasterPath)
 
-def extractProjection(inPath):
+def extractRasterProjection(inPath):
     '''
     Extract the projection of the dataset with GDAL.GetProjection()
     @inPath: path to the input file. Must be in one of the GDAL format. ex. 'GTiff'
@@ -1075,6 +1097,167 @@ def extractProjection(inPath):
     crs = dataset.GetProjection()
     print(crs)
     return crs
+
+def extractVectorProjection(file_path):
+    '''
+    Extract the projection of the dataset with GDAL.GetProjection()
+    @inPath: path to the input file. Must be in one of the GDAL format. ex. 'GTiff'
+    @Return: projection file
+    '''
+    # Open the shapefile
+    data_source = ogr.Open(file_path)
+    if data_source is None:
+        print("Could not open shapefile")
+        return None
+    # Get the first layer
+    layer = data_source.GetLayer(0)
+    if layer is None:
+        print("Could not get layer from shapefile")
+        return None
+    # Get the spatial reference
+    spatial_ref = layer.GetSpatialRef()
+    if spatial_ref is None:
+        print("Could not get spatial reference from shapefile")
+        return None
+    # Print the spatial reference
+    print(spatial_ref.ExportToPrettyWkt())
+    return spatial_ref
+
+def extractVectorEPSG(shapefile_path):
+    '''
+    Extract the EPSG value from a a shapefile projection. 
+    '''
+    # Open the shapefile
+    data_source = ogr.Open(shapefile_path)
+    if data_source is None:
+        print("Could not open shapefile")
+        return None
+    # Get the first layer
+    layer = data_source.GetLayer(0)
+    if layer is None:
+        print("Could not get layer from shapefile")
+        return None
+    # Get the spatial reference
+    spatial_ref = layer.GetSpatialRef()
+    if spatial_ref is None:
+        print("Could not get spatial reference from shapefile")
+        return None
+    # Get the EPSG value
+    return spatial_ref.GetAttrValue('AUTHORITY',1)
+
+def overwriteShapefileProjection(input_shapefile:os.path, target_epsg:int = 3979)-> bool:
+    '''
+    Reproject a shapefile IN PLACE. 
+      The function overwrite the EPGS value in the <input_shapefile>, with the <target_epsg>.
+    @input_shapefile: os.path: Path to the shapefile to reproject. 
+    @target_epsg: str (default = '3979'). Valid value from the EPGS list of values. (ex. 4326) 
+    @return: bool: False if any step fails, True otherwise. 
+    '''
+    # Get the input layer
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    dataSource = driver.Open(input_shapefile, 0) # 0 means read-only
+    if dataSource is None:
+            print("Could not open shapefile")
+            return False
+    layer = dataSource.GetLayer()
+    if layer is None:
+            print("Could not get layer from shapefile")
+            return False
+    dataSource.Destroy()
+
+    # Target Spatial Reference
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(target_epsg)
+
+    # Create the output shapefile
+    out_dataSource = driver.CreateDataSource(input_shapefile)
+    out_layer = out_dataSource.CreateLayer(input_shapefile,target_srs,geom_type=ogr.wkbPolygon)
+
+    # Add input Layer Fields to the output Layer if it is the one we want
+    in_layer_defn = layer.GetLayerDefn()
+    for i in range(0, in_layer_defn.GetFieldCount()):
+        field_defn = in_layer_defn.GetFieldDefn(i)
+        out_layer.CreateField(field_defn)
+
+    # Get the output Layer's Feature Definition
+    out_layer_defn = out_layer.GetLayerDefn()
+
+    # Reproject each feature
+    for i in range(0, layer.GetFeatureCount()):
+        # Get the input feature
+        in_feature = layer.GetFeature(i)
+        # Create output feature
+        out_feature = ogr.Feature(out_layer_defn)
+        # Set geometry after transforming
+        geom = in_feature.GetGeometryRef()
+        geom.TransformTo(target_srs)
+        out_feature.SetGeometry(geom)
+        # Add field values from input Layer
+        for i in range(0, out_layer_defn.GetFieldCount()):
+            out_feature.SetField(out_layer_defn.GetFieldDefn(i).GetNameRef(), in_feature.GetField(i))
+        # Add new feature to output Layer
+        out_layer.CreateFeature(out_feature)
+    
+    # Close DataSources
+    out_dataSource.Destroy()
+    return True
+
+def reprojectShapefile(input_shapefile:os.path, output_shapefile:os.path, target_epsg:int= 3979)->bool:
+    '''
+    Reproject a shapefile in a new shapefile in the path <output_shapefile>. The function create a new shapefile with the the EPGS value in the <target_epsg>, keeping the rest of the <input_shapefile> atributes.
+    @input_shapefile: os.path: Path to the input shapefile to reproject. 
+    @output_shapefile: os.path: Path to the new shapefile. 
+    @target_epsg: int (default = 3979). Valid value from the EPGS loist of values. (ex. 4326) 
+    @return: bool: False if any step fails, True otherwise. 
+    '''
+    # Get the input layer
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    dataSource = driver.Open(input_shapefile, 0) # 0 means read-only
+    if dataSource is None:
+            print("Could not open shapefile")
+            return False
+    layer = dataSource.GetLayer()
+    if layer is None:
+            print("Could not get layer from shapefile")
+            return False
+    
+    # Target Spatial Reference
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(target_epsg)
+
+    # Create the output shapefile
+    out_dataSource = driver.CreateDataSource(output_shapefile)
+    out_layer = out_dataSource.CreateLayer(output_shapefile,target_srs,geom_type=ogr.wkbPolygon)
+
+    # Add input Layer Fields to the output Layer if it is the one we want
+    in_layer_defn = layer.GetLayerDefn()
+    for i in range(0, in_layer_defn.GetFieldCount()):
+        field_defn = in_layer_defn.GetFieldDefn(i)
+        out_layer.CreateField(field_defn)
+
+    # Get the output Layer's Feature Definition
+    out_layer_defn = out_layer.GetLayerDefn()
+
+    # Reproject each feature
+    for i in range(0, layer.GetFeatureCount()):
+        # Get the input feature
+        in_feature = layer.GetFeature(i)
+        # Create output feature
+        out_feature = ogr.Feature(out_layer_defn)
+        # Set geometry after transforming
+        geom = in_feature.GetGeometryRef()
+        geom.TransformTo(target_srs)
+        out_feature.SetGeometry(geom)
+        # Add field values from input Layer
+        for i in range(0, out_layer_defn.GetFieldCount()):
+            out_feature.SetField(out_layer_defn.GetFieldDefn(i).GetNameRef(), in_feature.GetField(i))
+        # Add new feature to output Layer
+        out_layer.CreateFeature(out_feature)
+    
+    # Close DataSources
+    dataSource.Destroy()
+    out_dataSource.Destroy()
+    return True
 
 def reproject_PCRaster(tif_file,output_crs:str='EPSG:3979') -> str:
     """
@@ -1127,7 +1310,6 @@ def reproject_tif(tif_file, output_crs:str='EPSG:3979') -> str:
     output_srs = osr.SpatialReference()
     output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
     output_file_path = os.path.join(parent,inputNeme + '_' + ext)
-    
     # Create the output dataset
     '''
     Do not define input dataset crs. 
@@ -1148,55 +1330,13 @@ def assigneProjection(raster_file, output_crs:str='EPSG:3979') -> str:
      @return: The path to the reprojected file.
     '''
     _,communName,ext = get_parenPath_name_ext(raster_file)
-    input_crs = extractProjection(raster_file)
+    input_crs = extractRasterProjection(raster_file)
     if not input_crs:
         print(f'Reprojecting..... {communName}{ext}')
         if "map" in ext:
             return reproject_PCRaster(raster_file,output_crs)
         if 'tif' in ext:
             return reproject_tif(raster_file,output_crs) 
-
-def crop_tif(inputRaster:os.path, maskVector:os.path, outPath:os.path)->os.path:
-    """
-    Crops a TIFF file using a shapefile as a mask.
-    NOTE: It is important to FILL THE NEW DATASET WITH np.nan to avoid ending with big extentions of valid values, instead of NoData. 
-
-    Args:
-        inputRaster (str): Path to the input TIFF file.
-        maskVector (str): Path to the input shapefile.
-        outPath (str): Path to the output TIFF file.
-    Returns:
-        str: Path to the output TIFF file.
-    """
-    # Open the input TIFF file
-    dataset = gdal.Open(inputRaster)
-    cols = dataset.RasterXSize
-    rows = dataset.RasterYSize
-    count = dataset.RasterCount
-    datatype = gdal.GetDataTypeName(dataset.GetRasterBand(1).DataType)
-    print(f'cols,rows: {cols}:--{rows}')
-    print(f'datatype: {datatype}')
-    # Open the shapefile
-    shapefile_ds = ogr.Open(maskVector)
-    layer = shapefile_ds.GetLayer()
-    # Get the extent of the shapefile
-    extent = layer.GetExtent()
-    print(f'extent: {extent}')
-    # Set the output file format
-    driver = gdal.GetDriverByName('GTiff')
-    # Create the output dataset
-    output_dataset = driver.Create(outPath, cols,rows,count, gdal.GDT_Float32)
-    output_dataset.GetRasterBand(1).SetNoDataValue(-9999)  # Important step to ensure DO NOT FILL the whole extention with valid values. 
-    # Set the geotransform and projection
-    output_dataset.SetGeoTransform(dataset.GetGeoTransform())
-    output_dataset.SetProjection(dataset.GetProjection())
-    # Perform the cropping
-    print(f'output_dataset: {output_dataset}')
-    gdal.Warp(output_dataset, dataset, outputBounds=extent, cutlineDSName=maskVector, cropToCutline=True)
-    # ,cutlineLayer = 'bc_quesnel'
-    # Close the datasets
-    dataset = output_dataset= shapefile_ds = None
-    return outPath
 
 def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     '''
@@ -1343,7 +1483,7 @@ def getNeighborsGDAL(raster_file, shape_file):
 
     return output_array
 
-def fullSamplingTwoFasterForComparison(raster1_path, raster2_path) -> np.array:
+def fullSamplingTwoRasterForComparison(raster1_path, raster2_path) -> np.array:
     '''
     This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value  raster one, Z_value raster two]. 
     The first input raster is used as a reference. 
@@ -1486,26 +1626,10 @@ def randomSamplingTwoRaster(raster1_path, raster2_path, num_samples) -> np.array
 
     return samples
 
-def getFieldValueFromPolygon(vector_path, field_name, x, y)->list:
+def getFieldValueFromPolygonByCoordinates(vector_path:os.path, field_name:str, x:float, y:float)->list:
     # Open the vector file
     vector = ogr.Open(vector_path)
     layer = vector.GetLayer()
-    # Create a point geometry for the given coordinate pair
-    point = ogr.Geometry(ogr.wkbPoint)
-    point.AddPoint(x,y)
-    # Set up a spatial filter to select features that intersect with the point
-    layer.SetSpatialFilter(point)
-    # Get the value of the specified field for each intersecting feature
-    values = []
-    for feature in layer:
-        values.append(feature.GetField(field_name))
-    # Return the first value if there is at least one intersecting feature
-    if values:
-        return values
-    else:
-        return []
-
-def getFieldValueFromPolygonLayer(layer:ogr.Layer, field_name, x,y)->list:
     # Create a point geometry for the given coordinate pair
     point = ogr.Geometry(ogr.wkbPoint)
     point.AddPoint(x,y)
@@ -1551,7 +1675,6 @@ def getRasterValueByCoord(raster1_path, xy) -> np.array:
     y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
 
     '''    
-    
     # Get the shape of the rasters
     # Open raster and get its metadata
     raster1 = gdal.Open(raster1_path)
@@ -1764,7 +1887,10 @@ class WbT_DEM_FeatureExtraction():
         print("jensonPourPoints Done")
         return jensonOutput
 
-    def watershedConputing(self,d8Pointer, jensonOutput)-> os.path:  
+    def watershedConmputing(self,d8Pointer,jensonOutput)-> os.path:  
+        '''
+        Compute watershed corresponding to point in the DEM. 
+        '''
         output = addSubstringToName(self.FilledDEM, "_watersheds")
         wbt.watershed(
             d8Pointer, 
@@ -1776,8 +1902,11 @@ class WbT_DEM_FeatureExtraction():
         print("watershedConputing Done")
         return output
 
-    def watershedHillslopes(self,d8Pointer, streams)-> os.path:  
-        output = addSubstringToName(self.FilledDEM, "_hillslope")
+    def watershedHillslopes(self,d8Pointer, streams)-> os.path: 
+        '''
+        Compute watershed fo all point in the river network, to both sides of the rieve, asigning different number to each watershed. 
+        ''' 
+        output = addSubstringToName(self.FilledDEM, "_WsHillslope")
         wbt.hillslopes(
             d8Pointer, 
             streams, 
@@ -1826,7 +1955,7 @@ class WbT_DEM_FeatureExtraction():
         if not threshold:
             Quant = computeRasterQuantiles(FAcc)
             print(f" The FAcc quantiles are_______ {Quant}")
-            threshold = Quant[1] ### All values greater than the 75% of Flow Acc map. 
+            threshold = Quant[1] ### All values greater than the 95% of Flow Acc map. 
             print(f" The FAcc threshold is_______ {threshold}")
         wbt.extract_streams(
             FAcc, 
@@ -2413,21 +2542,18 @@ def addCollFromRasterToDataFrame(df_In,map, colName:str='')->pd.DataFrame:
         df_out[colName]=newColValues
     return df_out
 
-def addCollFromVectorFieldToDataFrame(df_In,vector, field, colName:str='')->pd.DataFrame:
+def addCollFromVectorFieldToDataFrame(df_In:pd.DataFrame,vector:os.path, field:str, colName:str='')->pd.DataFrame:
     '''
-    Add a column to a dataset, sampling from a raster at the points defined in the x_coord and y_coord of the input dataframe.
+    Add a column to a dataset, sampling from a vector at the points defined in the x_coord and y_coord of the input dataframe.
     @df_In: pandas DataFrame with the two first colums being: x_coord,y_coord.
     @map: Raster map. Raster map expected to have only one layer. 
     @colName: Name to asigne to the new column.If empty, the new column will be the map prefix. 
     @return: A dataframe with a column containing the sampling from <map>. 
     '''
     xyCols = df_In.iloc[:, :2].values
-    vector = ogr.Open(vector_path)
-    layer = vector.GetLayer()
-    newColValues = getFieldValueFromPolygon(vector,field,xyCols)
+    vector = ogr.Open(vector)
+    newColValues = getFieldValueFromPolygonByCoordinates(vector,field,xyCols)
     df_out = df_In.copy() 
-    
-    
     if colName:
         df_out[colName]=newColValues
     else:
@@ -2456,7 +2582,7 @@ list of the built-in color maps in Matplotlib:
 
 '''
 
-def read_shapefile(gdf:gpd.GeoDataFrame, field_name, x, y)-> [np.array,list]:
+def read_shapefile_at_xy(gdf:gpd.GeoDataFrame, field_name, x, y)-> [np.array,list]:
     '''
     ## To read the shapefile into a geopandas dataframe
     gdf = gpd.read_file(file_path)
@@ -2466,7 +2592,7 @@ def read_shapefile(gdf:gpd.GeoDataFrame, field_name, x, y)-> [np.array,list]:
     # return the feature values as an array
     return feature_values
 
-def sampleUniqueValByField_shpfile(shapefile_path, field_name:str, coordinates)->[np.ndarray,list]:
+def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordinates)->[np.ndarray,list]:
     '''
     Sample a shapefile from a list of <coordinates> and return: a column per unique value in the <field_name> and a list of unique values as string.
     NOTE: The function have been created to sample flood labels polygons by classes for the flood modeling project. 
@@ -2485,6 +2611,7 @@ def sampleUniqueValByField_shpfile(shapefile_path, field_name:str, coordinates)-
     ### Collect features IDs from the shpfile. 
     for i in range(featureCount):
         feature = layer.GetFeature(i)
+        print(f'Field to get unique values from {field_name}')
         next_ID = str(int(feature.GetField(field_name)))
         print(f'Feature ID {next_ID}')
         if next_ID not in featuresID:
@@ -2509,7 +2636,7 @@ def sampleUniqueValByField_shpfile(shapefile_path, field_name:str, coordinates)-
         row +=1
     return values,featuresID
 
-def addTargetColsToDataFrameCSV(df_csv,shpFile,target:str ='percentage', excludeClass:list=['0']):
+def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percentage', excludeClass:list=['0']):
     '''
     This function add to a dataset the Target columns. The dataset is provided as *.csv file and save to the same path a new file with perfix = "_withClasses.csv"
     @df_csv: os.path: Path to the *csv file.
@@ -2519,11 +2646,11 @@ def addTargetColsToDataFrameCSV(df_csv,shpFile,target:str ='percentage', exclude
     '''
     # Read the csv as pd.DataFrame
     df = pd.read_csv(df_csv)
-    # df.drop('0', axis=1, inplace=True)
     ## Extract x,y pairs array.
     xy = df.iloc[:,:2].values
     # Sample unique values by coordinates
-    array, nameList = sampleUniqueValByField_shpfile(shpFile,target,xy)
+    print(f'Buscando a Target in addTargetColsToDatasetCSV: {target}')
+    array, nameList = sampleVectorFieldByUniqueVal_shpfile(shpFile,target,xy)
     # Add colls to the dataframe and save it.
     for name in nameList:
         if name not in excludeClass: 
