@@ -3,33 +3,31 @@ import glob
 import pathlib
 import shutil
 from time import strftime
-from typing import Tuple, List, overload
+from typing import Tuple, List
 import pandas as pd
 import numpy as np
 from numpy import linspace
 import matplotlib.pyplot as plt
-from scipy.stats.kde import gaussian_kde
 import torch
 import rasterio as rio
 from rasterio.plot import show_hist
-from rasterio.enums import Resampling
+# from rasterio.enums import Resampling
 from datetime import datetime
 from whitebox.whitebox_tools import WhiteboxTools, default_callback
-import whitebox_workflows as wbw   
+# import whitebox_workflows as wbw   
 from torchgeo.datasets.utils import download_url
 from osgeo import gdal,ogr, osr
 from osgeo import gdal_array
 from osgeo.gdalconst import *
 import geopandas as gpd
 gdal.UseExceptions()
-import yaml
-
 
 import pcraster as pcr
 from pcraster import *
 
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
+import yaml
 
 ### General applications ##
 class timeit(): 
@@ -223,7 +221,7 @@ def createListFromCSV(csv_file_location, delim:str =','):
     df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
     out = []
     for i in range(0,df.shape[0]):
-        out.append(df.iloc[i,:].tolist())     
+        out.append(df.iloc[i,:]) 
     return out
 
 def createCSVFromList(pathToSave: os.path, listData:list):
@@ -707,7 +705,7 @@ def normalize_raster(inputRaster):
                 dst.write(normalized_data, i)
     return outputRaster
 
-def randomSamplingMultiBandRaster(rasterIn,ratio:float=1)-> np.array:
+def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 500000)-> np.array:
     '''
     Given a multiband raster, the algorith, takes a random number of saples and retur in np.array format. 
     The samples are ONLY VALID points according the criteria of been not NODataValue. (bandsArray[0]!= NoData and bandsArray[0] != np.NAN)
@@ -724,6 +722,8 @@ def randomSamplingMultiBandRaster(rasterIn,ratio:float=1)-> np.array:
         NoData = src.profile['nodata']
         W,H = src.width,src.height
         totalSamples = int((W*H)*ratio)
+        if totalSamples > maxSampling:
+            totalSamples = maxSampling
         print(f'Number of samples to take {totalSamples}')
         arrayDataset = np.zeros((totalSamples,(src.count+2)))
         while sampleCont<totalSamples:
@@ -1098,9 +1098,23 @@ def extractRasterProjection(inPath):
     print(crs)
     return crs
 
-def extractVectorProjection(file_path):
+def isValidShapefile(shpFilePath)->bool:
+    data_source = ogr.Open(shpFilePath)
+    if data_source is None:
+        print("Could not open shapefile")
+        return False
+    # Get the first layer
+    layer = data_source.GetLayer(0)
+    if layer is None:
+        print("Could not get layer from shapefile")
+        return False
+    data_source.Destroy()
+    print(f"Verified -> {shpFilePath}")
+    return True
+
+def extractVectorSpatialReference(file_path):
     '''
-    Extract the projection of the dataset with GDAL.GetProjection()
+    Extract the spatialReference of the dataset with GDAL.GetProjection()
     @inPath: path to the input file. Must be in one of the GDAL format. ex. 'GTiff'
     @Return: projection file
     '''
@@ -1119,88 +1133,17 @@ def extractVectorProjection(file_path):
     if spatial_ref is None:
         print("Could not get spatial reference from shapefile")
         return None
-    # Print the spatial reference
-    print(spatial_ref.ExportToPrettyWkt())
+    #### ___ Uncomment next line to Print the spatial reference
+    # print(spatial_ref.ExportToPrettyWkt())
+    data_source.Destroy()
     return spatial_ref
 
 def extractVectorEPSG(shapefile_path):
     '''
-    Extract the EPSG value from a a shapefile projection. 
+    Extract the EPSG value from shapefile spatial reference. 
     '''
-    # Open the shapefile
-    data_source = ogr.Open(shapefile_path)
-    if data_source is None:
-        print("Could not open shapefile")
-        return None
-    # Get the first layer
-    layer = data_source.GetLayer(0)
-    if layer is None:
-        print("Could not get layer from shapefile")
-        return None
-    # Get the spatial reference
-    spatial_ref = layer.GetSpatialRef()
-    if spatial_ref is None:
-        print("Could not get spatial reference from shapefile")
-        return None
-    # Get the EPSG value
+    spatial_ref = extractVectorSpatialReference(shapefile_path)
     return spatial_ref.GetAttrValue('AUTHORITY',1)
-
-def overwriteShapefileProjection(input_shapefile:os.path, target_epsg:int = 3979)-> bool:
-    '''
-    Reproject a shapefile IN PLACE. 
-      The function overwrite the EPGS value in the <input_shapefile>, with the <target_epsg>.
-    @input_shapefile: os.path: Path to the shapefile to reproject. 
-    @target_epsg: str (default = '3979'). Valid value from the EPGS list of values. (ex. 4326) 
-    @return: bool: False if any step fails, True otherwise. 
-    '''
-    # Get the input layer
-    driver = ogr.GetDriverByName('ESRI Shapefile')
-    dataSource = driver.Open(input_shapefile, 0) # 0 means read-only
-    if dataSource is None:
-            print("Could not open shapefile")
-            return False
-    layer = dataSource.GetLayer()
-    if layer is None:
-            print("Could not get layer from shapefile")
-            return False
-    dataSource.Destroy()
-
-    # Target Spatial Reference
-    target_srs = osr.SpatialReference()
-    target_srs.ImportFromEPSG(target_epsg)
-
-    # Create the output shapefile
-    out_dataSource = driver.CreateDataSource(input_shapefile)
-    out_layer = out_dataSource.CreateLayer(input_shapefile,target_srs,geom_type=ogr.wkbPolygon)
-
-    # Add input Layer Fields to the output Layer if it is the one we want
-    in_layer_defn = layer.GetLayerDefn()
-    for i in range(0, in_layer_defn.GetFieldCount()):
-        field_defn = in_layer_defn.GetFieldDefn(i)
-        out_layer.CreateField(field_defn)
-
-    # Get the output Layer's Feature Definition
-    out_layer_defn = out_layer.GetLayerDefn()
-
-    # Reproject each feature
-    for i in range(0, layer.GetFeatureCount()):
-        # Get the input feature
-        in_feature = layer.GetFeature(i)
-        # Create output feature
-        out_feature = ogr.Feature(out_layer_defn)
-        # Set geometry after transforming
-        geom = in_feature.GetGeometryRef()
-        geom.TransformTo(target_srs)
-        out_feature.SetGeometry(geom)
-        # Add field values from input Layer
-        for i in range(0, out_layer_defn.GetFieldCount()):
-            out_feature.SetField(out_layer_defn.GetFieldDefn(i).GetNameRef(), in_feature.GetField(i))
-        # Add new feature to output Layer
-        out_layer.CreateFeature(out_feature)
-    
-    # Close DataSources
-    out_dataSource.Destroy()
-    return True
 
 def reprojectShapefile(input_shapefile:os.path, output_shapefile:os.path, target_epsg:int= 3979)->bool:
     '''
@@ -1250,7 +1193,11 @@ def reprojectShapefile(input_shapefile:os.path, output_shapefile:os.path, target
         out_feature.SetGeometry(geom)
         # Add field values from input Layer
         for i in range(0, out_layer_defn.GetFieldCount()):
-            out_feature.SetField(out_layer_defn.GetFieldDefn(i).GetNameRef(), in_feature.GetField(i))
+            nameRef = out_layer_defn.GetFieldDefn(i).GetNameRef()
+            # print( f"nameRef {nameRef} and nameRef type{type(nameRef)}")
+            field = in_feature.GetField(i)
+            # print( f"field {field} and field type{type(field)}")
+            out_feature.SetField(nameRef, field)
         # Add new feature to output Layer
         out_layer.CreateFeature(out_feature)
     
@@ -2427,7 +2374,7 @@ def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
     print(f"Tails downloaded to: {confirmedLocalPath}")
 
 ##################################################################
-########  DATA Analis tools for Geo Spatial information   ########
+########  DATA Analis tools for Geospatial Information   ########
 ##################################################################
 
 def remove_nan_vector(array):
@@ -2611,17 +2558,19 @@ def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordin
     ### Collect features IDs from the shpfile. 
     for i in range(featureCount):
         feature = layer.GetFeature(i)
-        print(f'Field to get unique values from {field_name}')
+        print(f'Field to get unique values from -> {field_name}')
         next_ID = str(int(feature.GetField(field_name)))
         print(f'Feature ID {next_ID}')
         if next_ID not in featuresID:
             featuresID.append(next_ID)
     
     # Create an empty array to store the values
-    values = np.zeros((coordinates.shape[0],featureCount))
-    print(f'Output array shape {values.shape}')
+    Samples = coordinates.shape[0]
+    values = np.zeros((Samples,featureCount))
+    print(f'Sampling vector by coordinates. Number of samples to take-> {values.shape}')
     # Iterate over each pair of coordinates
     row = 0
+    startTime = datetime.now()
     for x, y in coordinates:
         # Create a point
         point = ogr.Geometry(ogr.wkbPoint)
@@ -2634,23 +2583,32 @@ def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordin
             # print(f'x->{x}, y->{y}, fid -> {fid}, value -> {feature.GetField(field_name)}')
         point = None
         row +=1
+        if row%1000 == 0:
+            elapsed_time = datetime.now() - startTime
+            avg_time_per_epoch = elapsed_time.total_seconds() / row
+            remaining_epochs = Samples - row
+            estimated_time = remaining_epochs * avg_time_per_epoch
+            print(f"Extracted Samples -> {row}  Elapsed Time: {elapsed_time}, Estimated Time to End: {estimated_time} seconds")
+
     return values,featuresID
 
-def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percentage', excludeClass:list=['0']):
+def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percentage', excludeClass:list=['0'])-> os.path:
     '''
     This function add to a dataset the Target columns. The dataset is provided as *.csv file and save to the same path a new file with perfix = "_withClasses.csv"
     @df_csv: os.path: Path to the *csv file.
     @shpFile: os.path: Path to the shapefile to sample from.
     @target:str = target coll name in the dataset.
-    @return: os.path: path to the new *csv containing the dataset. 
+    @return: os.path: path to the new *.csv containing the dataset. 
     '''
     # Read the csv as pd.DataFrame
     df = pd.read_csv(df_csv)
     ## Extract x,y pairs array.
     xy = df.iloc[:,:2].values
     # Sample unique values by coordinates
-    print(f'Buscando a Target in addTargetColsToDatasetCSV: {target}')
-    array, nameList = sampleVectorFieldByUniqueVal_shpfile(shpFile,target,xy)
+    with timeit:
+        array, nameList = sampleVectorFieldByUniqueVal_shpfile(shpFile,target,xy)
+        print("Sampling labels END")
+            
     # Add colls to the dataframe and save it.
     for name in nameList:
         if name not in excludeClass: 
