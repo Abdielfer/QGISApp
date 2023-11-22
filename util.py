@@ -357,7 +357,6 @@ def overWriteHydraConfig(hydraYML, newParams) -> bool:
     
     return True
 
-
 def updateDict(dic:dict, args:dict)->dict:
     outDic = dic
     for k in args.keys():
@@ -512,7 +511,7 @@ def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
             if maskName in tifName:
                 outPath = os.path.join(wdir,maskName+'_clip.tif')
                 print('-----------------------Cropping --------------------')
-                crop_tif(i,j,outPath)
+                clipRasterByMask(i,j,outPath)
                 print(f'{outPath}')
                 print('-----------------------Cropped --------------------  \n')
     print("All done --->")        
@@ -955,7 +954,6 @@ def saveIt(dataset, path):
             return path_Reproj,translatedTIff
         else:
             return path,translatedTIff
-
 ######################
 ####   GDAL Tools  ###
 ######################

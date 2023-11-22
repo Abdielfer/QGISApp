@@ -87,7 +87,7 @@ def main(cfg: DictConfig):
     ####  Reproject all labels
     allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
     pathList = U.createListFromCSV(allFloodList, delim=';')
-    parallelizer(customFunction,pathList)
+    maxParalelizer(customFunction,pathList)
     
    
 
