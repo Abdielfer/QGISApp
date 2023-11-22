@@ -1,5 +1,6 @@
 # import dc_extract
 import os
+import time
 from typing import Tuple
 import hydra 
 from hydra.utils import instantiate
@@ -7,6 +8,9 @@ from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging 
 import pandas as pd
+import multiprocessing
+import concurrent.futures
+
 # from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance of the license are created, it can kill my license. Thank you!!
 KMP_DUPLICATE_LIB_OK=True
 
@@ -35,18 +39,42 @@ def runFunctionInLoop(csvList, function):
         else:
             print(f"Path not found -> {path}")
 
-def customFunction(csvList):
-    pathList =  U.createListFromCSV(csvList, delim=';')
-    for i in pathList:
-        dem = i[1]
-        print('_____________________ New Datase __________________')
-        print(f'cdem: {dem}')
-        labels = i[0]
-        print(f'labels: {labels}')
-        samplingArea = i[2]
-        print(f'samplingArea: {samplingArea}')
-        U.fromDEMtoDataFrame(dem,labels,mask=samplingArea, samplingRatio=0.2)
-    return 
+def customFunction(pathList):
+    dem = pathList[1]
+    print('_____________________ New Datase __________________')
+    print(f'cdem: {dem}')
+    labels = pathList[0]
+    print(f'labels: {labels}')
+    samplingArea = pathList[2]
+    print(f'samplingArea: {samplingArea}')
+    U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
+   
+
+def parallelizer(function, args:list, executors:int = 4):
+    '''
+    Parallelize the <function> in the input to the specified number of <executors>.
+    @function: python function
+    @args: list: list of argument to pas to the function in parallel. 
+    '''
+    with concurrent.futures.ProcessPoolExecutor(executors) as executor:
+        start_time = time.perf_counter()
+        result = list(executor.map(function,args))
+        finish_time = time.perf_counter()
+    print(f"Program finished in {finish_time-start_time} seconds")
+    print(result)
+
+
+def maxParalelizer(function, args):
+    '''
+    Same as paralelizer, but optimize the pool to the capacity of the current processor.
+    NOTE: To be tested
+    '''
+    pool = multiprocessing.Pool()
+    start_time = time.perf_counter()
+    result = pool.map(function,args)
+    finish_time = time.perf_counter()
+    print(f"Program finished in {finish_time-start_time} seconds")
+    print(result)
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
@@ -55,21 +83,13 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
-    # customFunction(csvList)
-    # tif = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem_fill_hillslope.tif'
-    # watersheds = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_watershed.shp'
-    # U.raster_max_by_polygons(tif,watersheds)
- 
+
     ####  Reproject all labels
     allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
-    customFunction(allFloodList)
-
+    pathList = U.createListFromCSV(allFloodList, delim=';')
+    parallelizer(customFunction,pathList)
     
-    # U.overwriteShapefileProjection(out_shp)
-    # configFile = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\config\mainConfigPC.yaml'
-    # newParams = {'normalizers': '[100,22,53]'}
-    # U.overWriteHydraConfig(configFile,newParams)
+   
 
 if __name__ == "__main__":
     with U.timeit():
@@ -92,3 +112,16 @@ if __name__ == "__main__":
     # csvTifList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsDEM16mTif.csv'
     # DEM = U.createListFromCSV(csvTifList)
     # U.plotRasterPDFComparison(DEM,ax_x_units='m',save=False,show=True,title='Full Dataset Histogram of relative elevation')
+    
+    #### Overwrite Projection
+    # U.overwriteShapefileProjection(out_shp)
+    # configFile = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\config\mainConfigPC.yaml'
+    
+    #### Overwrite Hydra config file
+    # newParams = {'normalizers': '[100,22,53]'}
+    # U.overWriteHydraConfig(configFile,newParams)
+
+    ### Regional statictics with polygons
+    # tif = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem_fill_hillslope.tif'
+    # watersheds = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_watershed.shp'
+    # U.raster_max_by_polygons(tif,watersheds)

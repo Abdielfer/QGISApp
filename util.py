@@ -41,6 +41,11 @@ class timeit():
     def __exit__(self, *args, **kwargs):
         print('runtime: {}'.format(datetime.now() - self.tic))
 
+def seconds_to_datetime(seconds):
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f'{hours}:{minutes}:{seconds}'
+
 def makeNameByTime():
     name = strftime("%y%m%d%H%M")
     return name
@@ -705,7 +710,7 @@ def normalize_raster(inputRaster):
                 dst.write(normalized_data, i)
     return outputRaster
 
-def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 500000)-> np.array:
+def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 150000)-> np.array:
     '''
     Given a multiband raster, the algorith, takes a random number of saples and retur in np.array format. 
     The samples are ONLY VALID points according the criteria of been not NODataValue. (bandsArray[0]!= NoData and bandsArray[0] != np.NAN)
@@ -2588,7 +2593,7 @@ def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordin
             avg_time_per_epoch = elapsed_time.total_seconds() / row
             remaining_epochs = Samples - row
             estimated_time = remaining_epochs * avg_time_per_epoch
-            print(f"Extracted Samples -> {row}  Elapsed Time: {elapsed_time}, Estimated Time to End: {estimated_time} seconds")
+            print(f"Extracted Samples -> {row}  Elapsed Time: {elapsed_time}, Estimated Time to End: {seconds_to_datetime(estimated_time)}")
 
     return values,featuresID
 
@@ -2605,7 +2610,7 @@ def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percen
     ## Extract x,y pairs array.
     xy = df.iloc[:,:2].values
     # Sample unique values by coordinates
-    with timeit:
+    with timeit():
         array, nameList = sampleVectorFieldByUniqueVal_shpfile(shpFile,target,xy)
         print("Sampling labels END")
             
