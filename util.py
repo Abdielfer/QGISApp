@@ -1,26 +1,29 @@
 import os, ntpath
 import glob
-import pathlib
+# import pathlib
 import shutil
+import time
 from time import strftime
 from typing import Tuple, List
 import pandas as pd
 import numpy as np
 from numpy import linspace
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import torch
 import rasterio as rio
 from rasterio.plot import show_hist
 # from rasterio.enums import Resampling
 from datetime import datetime
-from whitebox.whitebox_tools import WhiteboxTools, default_callback
-# import whitebox_workflows as wbw   
+from whitebox_tools import WhiteboxTools, default_callback
 from torchgeo.datasets.utils import download_url
 from osgeo import gdal,ogr, osr
 from osgeo import gdal_array
 from osgeo.gdalconst import *
 import geopandas as gpd
 gdal.UseExceptions()
+
+import multiprocessing
+import concurrent.futures
 
 import pcraster as pcr
 from pcraster import *
@@ -217,16 +220,18 @@ def listALLFilesInDirBySubstring_fullPath(cwd, substring = '.csv')->list:
         fullList.extend(localList) 
     return fullList
 
-def createListFromCSV(csv_file_location, delim:str =','):  
+def createListFromCSV(csv_file_location: os.path, delim:str =','):  
     '''
     @return: list from a <csv_file_location>.
     Argument:
     @csv_file_location: full path file location and name.
     '''       
     df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
+    print(f'Dataframe row 0 {df.iloc[0,:]}')
     out = []
     for i in range(0,df.shape[0]):
-        out.append(df.iloc[i,:]) 
+        out.append([j for j in df.iloc[i,:]])
+    print(f'Out final row {out[-1]}') 
     return out
 
 def createCSVFromList(pathToSave: os.path, listData:list):
@@ -246,7 +251,7 @@ def createCSVFromList(pathToSave: os.path, listData:list):
     # removeFile(textPath)
     return True
 
-def createListFromCSVColumn(csv_file_location, col_idx, delim:str =','):  
+def createListFromCSVColumn(csv_file_location:os.path, col_idx, delim:str =','):  
     '''
     @return: list from <col_id> in <csv_file_location>.
     Argument:
@@ -541,9 +546,62 @@ def fromDEMtoDataFrame(DEM:os.path,labels:os.path,target:str='percentage',mask:o
     df = pd.DataFrame(samplesArr,columns=colList)
     scv_output = replaceExtention(rasterMultiband,'_DSet.csv')
     df.to_csv(scv_output,index=None)
-    print(f'Buscando a Target in fromDEMtoDataFrame: {target}')
-    addTargetColsToDatasetCSV(scv_output,labels,target)
+    # addTargetColsToDatasetCSV()
     return scv_output
+
+
+def buildShapefilePointFromCsvDataframe(csvDataframe:os.path, outShepfile:os.path='', EPGS:int=4326):
+    '''
+    Creates a shapefile of points from a Dataframe <df>. The DataFrame is expected to have a HEADER, and the two first colums with the x_coordinates and y_coordinates respactivelly.
+    @csvDatafame:os.path: Path to the *csv containing the Dataframe with the list of points to add to the Shapefile. 
+    @outShepfile:os.path: Output path to the shapefile (Optional). If Non, the shapefile will have same path and name that csvDataframe.
+    @EPGS: EPGS value of a valid reference system (Optional).(Default = 4326).
+    '''
+    df = pd.read_csv(csvDataframe)
+    #### Create a new shapefile
+    ## Set shapefile path.
+    if outShepfile:
+        outShp = outShepfile
+    else: 
+        outShp = replaceExtention(csvDataframe,'.shp')
+        print(outShp)
+    driver = ogr.GetDriverByName("ESRI Shapefile")
+    ds = driver.CreateDataSource(outShp)
+
+    # Set the spatial reference
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(EPGS)  # WGS84
+
+    # Create a new layer
+    layer = ds.CreateLayer("", srs, ogr.wkbPoint)
+
+    # Add fields
+    for column in df.columns:
+        field = ogr.FieldDefn(column, ogr.OFTReal)
+        field.SetWidth(10)  # Total field width
+        field.SetPrecision(2)  # Width of decimal part
+        layer.CreateField(field)
+
+    # Add points
+    for idx,row in df.iterrows():
+        # Create a new feature
+        feature = ogr.Feature(layer.GetLayerDefn())
+        # Set the attributes
+        for column in df.columns:
+            feature.SetField(column, row[column])
+        # Create a new point geometry
+        point = ogr.Geometry(ogr.wkbPoint)
+        point.AddPoint(row[0], row[1])
+        # Set the feature geometry
+        feature.SetGeometry(point)
+        # Create the feature in the layer
+        layer.CreateFeature(feature)
+        # Dereference the feature
+        feature = None
+
+    # Dereference the data source
+    ds = None
+
 
 #######################
 ### Rasterio Tools  ###
@@ -1703,7 +1761,7 @@ def multiple_dc_extract_ByPolygonList(cfg: DictConfig):
 wbt = WhiteboxTools()
 # currentDirectory = os.getcwd()
 # wbt.set_working_dir(currentDirectory)
-wbt.set_verbose_mode(False)
+wbt.set_verbose_mode(True)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
     ## Pretraitment #
@@ -1713,6 +1771,7 @@ class WbT_DEM_FeatureExtraction():
     Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar derived  1m or < 2m. 
     '''
     def __init__(self,DEM) -> None:
+        print(f"In WbT {type(wbt)}")
         self.parentDir,_,_ = get_parenPath_name_ext(DEM)
         self.DEMName = DEM
         self.FilledDEM = addSubstringToName(DEM,'_fill')
@@ -2119,7 +2178,7 @@ class generalRasterTools():
             return False 
         return True
 
-    def rasterResampler(sefl,inputRaster, outputRaster, outputCellSize:int,resampleMethod = 'bilinear'):
+    def rasterResampler(self,inputRaster, outputRaster, outputCellSize:int,resampleMethod = 'bilinear'):
         '''
         wbt.Resampler ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/image_processing_tools.html#Resample
         NOTE: It performes Mosaic if several inputs are provided, in addition to resampling. See refference for details. 
@@ -2185,17 +2244,18 @@ class generalRasterTools():
         if clearTransitDir: 
             clearTransitFolderContent(transitFolderPath)
 
-    def rasterToVectorLine(sefl, inputRaster, outputVector):
+    def rasterToVectorLine(self, inputRaster, outputVector):
         wbt.raster_to_vector_lines(
             inputRaster, 
             outputVector, 
             callback=default_callback
             )
 
-    def rasterVisibility_index(sefl, inputDTM, outputVisIdx, resFator = 2.0):
+    def rasterVisibility_index(self, inputDTM, outputVisIdx, resFator = 2.0):
         '''
         Both, input and output are raster. 
         '''
+        print(f"Into Visibility index")
         wbt.visibility_index(
                 inputDTM, 
                 outputVisIdx, 
@@ -2204,7 +2264,7 @@ class generalRasterTools():
                 callback=default_callback
                 )           
 
-    def gaussianFilter(sefl, input, output, sigma = 0.75):
+    def gaussianFilter(self, input, output, sigma = 0.75):
         '''
         input@: kernelSize = integer or tupel(x,y). If integer, kernel is square, othewise, is a (with=x,hight=y) rectagle. 
         '''
@@ -2313,49 +2373,50 @@ def DEMFeaturingForMLP_WbT(DEM)-> list:
     '''
     outList = [DEM]
     DEM_Features = WbT_DEM_FeatureExtraction(DEM)
+    print(type(DEM_Features))
     print(f"Extracting features from DEM >>>>")
-    ## Geomorphons
+    # Geomorphons
     geomorph = DEM_Features.wbT_geomorphons()
-    replace_no_data_value(geomorph)
+    # replace_no_data_value(geomorph)
     outList.append(geomorph)
-    print(f"-------------Geomorphons ready at {geomorph}")
-    ## Flood Order
-    FloodOrd = DEM_Features.FloodOrder()
-    replace_no_data_value(FloodOrd)
-    outList.append(FloodOrd)
-    print(f"-------------Flood Order ready at {FloodOrd}")
-    ## DEM Filling
-    DEM_Features.fixNoDataAndfillDTM()
-    print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
-    ## Slope
-    slope = DEM_Features.computeSlope()
-    outList.append(slope)
-    print(f"-------------Slope ready at {slope}")
-    ## Flow direction
-    D8Pointer = DEM_Features.d8_Pointer() 
-    print(f"-------------Flow direction ready at {D8Pointer}")
-    FAcc = DEM_Features.d8_flow_accumulation()
-    replace_no_data_value(FAcc)
-    outList.append(FAcc)
-    print(f"-------------Flow accumulation ready at {FAcc}")
-    stream = DEM_Features.extract_stream(FAcc)
-    print(f"-------------Stream ready at {stream}")
-    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
-    print(f"-------------Strahler Order ready at {strahlerOrder}")
-    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
-    print(f"-------------Main river ready at {mainRiver}")
-    HAND = DEM_Features.WbT_HAND(mainRiver)
-    outList.append(HAND)
-    print(f"-------------HAND index ready at {HAND}")
-    proximity = computeProximity(mainRiver)
-    outList.append(proximity)
-    print(f"-------------Proximity index ready at {proximity}")
-    ## Catchment extraction
-    DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
-    ### Save the list of features path as csv. 
-    csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
-    createCSVFromList(csvPath,outList)
-    print(f"--------Features done!----------")
+    # print(f"-------------Geomorphons ready at {geomorph}")
+    # ## Flood Order
+    # FloodOrd = DEM_Features.FloodOrder()
+    # replace_no_data_value(FloodOrd)
+    # outList.append(FloodOrd)
+    # print(f"-------------Flood Order ready at {FloodOrd}")
+    # # DEM Filling
+    # DEM_Features.fixNoDataAndfillDTM()
+    # print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
+    # ## Slope
+    # slope = DEM_Features.computeSlope()
+    # outList.append(slope)
+    # print(f"-------------Slope ready at {slope}")
+    # ## Flow direction
+    # D8Pointer = DEM_Features.d8_Pointer() 
+    # print(f"-------------Flow direction ready at {D8Pointer}")
+    # FAcc = DEM_Features.d8_flow_accumulation()
+    # replace_no_data_value(FAcc)
+    # outList.append(FAcc)
+    # print(f"-------------Flow accumulation ready at {FAcc}")
+    # stream = DEM_Features.extract_stream(FAcc)
+    # print(f"-------------Stream ready at {stream}")
+    # strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
+    # print(f"-------------Strahler Order ready at {strahlerOrder}")
+    # mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
+    # print(f"-------------Main river ready at {mainRiver}")
+    # HAND = DEM_Features.WbT_HAND(mainRiver)
+    # outList.append(HAND)
+    # print(f"-------------HAND index ready at {HAND}")
+    # proximity = computeProximity(mainRiver)
+    # outList.append(proximity)
+    # print(f"-------------Proximity index ready at {proximity}")
+    # ## Catchment extraction
+    # DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
+    # ### Save the list of features path as csv. 
+    # csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
+    # createCSVFromList(csvPath,outList)
+    # print(f"--------Features done!----------")
     return outList  
 
 # Helpers
@@ -2593,6 +2654,7 @@ def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordin
             estimated_time = remaining_epochs * avg_time_per_epoch
             print(f"Extracted Samples -> {row}  Elapsed Time: {elapsed_time}, Estimated Time to End: {seconds_to_datetime(estimated_time)}")
 
+
     return values,featuresID
 
 def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percentage', excludeClass:list=['0'])-> os.path:
@@ -2620,3 +2682,72 @@ def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percen
     print(df.head)
     df.to_csv(saveTo,index=None)
     return saveTo 
+
+def addTargetColsToDatasetCSVSimplified(args:dict)-> os.path:
+    '''
+    This function add to a dataset the Target columns. The dataset is provided as *.csv file and save to the same path a new file with perfix = "_withClasses.csv"
+    @df_csv: os.path: Path to the *csv file.
+    @shpFile: os.path: Path to the shapefile to sample from.
+    @target:str = target coll name in the dataset.
+    @return: os.path: path to the new *.csv containing the dataset. 
+    '''
+    df_csv = args['df_csv']
+    shpFile = args['shpFile']
+    target:str ='percentage'
+    excludeClass:list=['0']
+
+    # Read the csv as pd.DataFrame
+    df = pd.read_csv(df_csv)
+    ## Extract x,y pairs array.
+    xy = df.iloc[:,:2].values
+    # Sample unique values by coordinates
+    with timeit():
+        array, nameList = sampleVectorFieldByUniqueVal_shpfile(shpFile,target,xy)
+        print("Sampling labels END")
+            
+    # Add colls to the dataframe and save it.
+    for name in nameList:
+        if name not in excludeClass: 
+            df[name] = array[:,nameList.index(name)]
+    saveTo = addSubstringToName(df_csv,"_withClasses")
+    print(df.head)
+    df.to_csv(saveTo,index=None)
+    return saveTo 
+
+#####  Parallelizer
+def parallelizerWithProcess(function, args:list, executors:int = 4):
+    '''
+    Parallelize the <function> in the input to the specified number of <executors>.
+    @function: python function
+    @args: list: list of argument to pas to the function in parallel. 
+    '''
+    with concurrent.futures.ProcessPoolExecutor(executors) as executor:
+        # start_time = time.perf_counter()
+        result = list(executor.map(function,args))
+        # finish_time = time.perf_counter()
+    # print(f"Program finished in {finish_time-start_time} seconds")
+    print(result)
+
+def parallelizerWithThread(function, args:list, executors:int = None):
+    '''
+    Parallelize the <function> in the input to the specified number of <executors>.
+    @function: python function
+    @args: list: list of argument to pas to the function in parallel. 
+    '''
+    with concurrent.futures.ThreadPoolExecutor(executors) as executor:
+            start_time = time.perf_counter()
+            result = list(executor.map(function, args))
+            finish_time = time.perf_counter()
+    print(f"Program finished in {finish_time-start_time} seconds")
+    print(result)
+
+def maxParalelizer(function,args):
+    '''
+    Same as paralelizer, but optimize the pool to the capacity of the current processor.
+    NOTE: To be tested
+    '''
+    print(args)
+    pool = multiprocessing.Pool(4)
+    result = pool.map(function,args)
+    print(result)
+

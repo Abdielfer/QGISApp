@@ -1,21 +1,12 @@
 # import dc_extract
-import os
-import time
-from typing import Tuple
 import hydra 
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging 
-import pandas as pd
-import multiprocessing
-import concurrent.futures
 
 # from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance of the license are created, it can kill my license. Thank you!!
 KMP_DUPLICATE_LIB_OK=True
-
-from osgeo import gdal
-from osgeo.gdalconst import *
 
 def logger(cfg: DictConfig, nameByTime):
     '''
@@ -33,11 +24,10 @@ def runFunctionInLoop(csvList, function):
     '''
     listOfPath = U.createListFromCSV(csvList)
     for path in listOfPath:
-        if os.path.exists(path):
-            with U.timeit():
-                function(path)
-        else:
-            print(f"Path not found -> {path}")
+        # if os.path.exists(path):
+        function(path)
+        # else:
+        #     print(f"Path not found -> {path}")
 
 def customFunction(pathList):
     dem = pathList[1]
@@ -47,49 +37,28 @@ def customFunction(pathList):
     print(f'labels: {labels}')
     samplingArea = pathList[2]
     print(f'samplingArea: {samplingArea}')
-    U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
+    # U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
+    wdir,_,_ = U.get_parenPath_name_ext(dem)
+    reasterTrans = U.generalRasterTools(wdir)
+    out = U.addSubstringToName(dem,"_KK")
+    reasterTrans.rasterVisibility_index(dem,out)
+    
    
-
-def parallelizer(function, args:list, executors:int = 4):
-    '''
-    Parallelize the <function> in the input to the specified number of <executors>.
-    @function: python function
-    @args: list: list of argument to pas to the function in parallel. 
-    '''
-    with concurrent.futures.ProcessPoolExecutor(executors) as executor:
-        start_time = time.perf_counter()
-        result = list(executor.map(function,args))
-        finish_time = time.perf_counter()
-    print(f"Program finished in {finish_time-start_time} seconds")
-    print(result)
-
-
-def maxParalelizer(function, args):
-    '''
-    Same as paralelizer, but optimize the pool to the capacity of the current processor.
-    NOTE: To be tested
-    '''
-    pool = multiprocessing.Pool()
-    start_time = time.perf_counter()
-    result = pool.map(function,args)
-    finish_time = time.perf_counter()
-    print(f"Program finished in {finish_time-start_time} seconds")
-    print(result)
-
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
-    # chIn   # To check-in the wbtools license
+    
     # nameByTime = U.makeNameByTime()
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
 
-    ####  Reproject all labels
     allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
-    pathList = U.createListFromCSV(allFloodList, delim=';')
-    maxParalelizer(customFunction,pathList)
-    
-   
+    pathList = U.createListFromCSV(allFloodList)
+    for i in pathList:
+        customFunction(i)
+        break
+
+
 
 if __name__ == "__main__":
     with U.timeit():
@@ -125,3 +94,12 @@ if __name__ == "__main__":
     # tif = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem_fill_hillslope.tif'
     # watersheds = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_watershed.shp'
     # U.raster_max_by_polygons(tif,watersheds)
+
+    ### Building shapefile from csv.
+    # csvDataFrame = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem_features_DSet_withClasses.csv'
+    # U.buildShapefilePointFromCsvDataframe(csvDataFrame, EPGS=3979) 
+    
+     ####  Parallelizing. 
+    # allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
+    # pathList = U.createListFromCSV(allFloodList, delim=';')
+    # maxParalelizer(customFunction,pathList)

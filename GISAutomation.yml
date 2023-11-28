@@ -1,4 +1,4 @@
-name: GISAutomation
+name: GISAuto
 channels:
   - conda-forge
 dependencies:
