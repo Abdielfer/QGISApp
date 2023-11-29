@@ -37,11 +37,8 @@ def customFunction(pathList):
     print(f'labels: {labels}')
     samplingArea = pathList[2]
     print(f'samplingArea: {samplingArea}')
-    # U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
-    wdir,_,_ = U.get_parenPath_name_ext(dem)
-    reasterTrans = U.generalRasterTools(wdir)
-    out = U.addSubstringToName(dem,"_KK")
-    reasterTrans.rasterVisibility_index(dem,out)
+    U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
+    
     
    
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
@@ -51,22 +48,8 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-
-    # allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
-    # pathList = U.createListFromCSV(allFloodList)
-    # for i in pathList:
-    #     customFunction(i)
-    #     break
-
-    ### Download, merging and resampling HRDTM tiles ###
-    WbWDir = cfg['output_dir']
-    WbTransf = U.generalRasterTools(WbWDir)
-    aoi1_dtm =r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\HRDEM_DTM_FootPrint\AOI_1_dtm.csv'
-    WbTransf.mosaikAndResamplingFromCSV(aoi1_dtm,1,'Ftp_dtm')
-
-    aoi1_dsm = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\HRDEM_DTM_FootPrint\AOI_1_dtm.csv'
-    WbTransf.mosaikAndResamplingFromCSV(aoi1_dsm,1,'Ftp_dsm')
-
+    pathList = 
+    
 
 
 if __name__ == "__main__":
@@ -82,7 +65,6 @@ if __name__ == "__main__":
     #                 r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\NF_StJohns\StJohns_HRDEM.csv',
     #                 r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\QC_Quebec\QC_HRDEM\QC_HRDEM_Quebec_600015_34.csv',
     #                 r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\QC_Quebec\QC_HRDEM\QC_HRDEM_Levis.csv']
-    
     # for csv in csvTilesList:
     #     WbTransf.mosaikAndResamplingFromCSV(csv,8,'Ftp_dtm')
 

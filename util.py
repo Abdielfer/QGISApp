@@ -220,18 +220,28 @@ def listALLFilesInDirBySubstring_fullPath(cwd, substring = '.csv')->list:
         fullList.extend(localList) 
     return fullList
 
-def createListFromCSV(csv_file_location: os.path, delim:str =','):  
+def createListFromCSV_multiplePathPerRow(csv_file_location: os.path, delim:str =',')-> list[list]:  
     '''
     @return: list from a <csv_file_location>.
     Argument:
     @csv_file_location: full path file location and name.
     '''       
     df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
-    print(f'Dataframe row 0 {df.iloc[0,:]}')
     out = []
     for i in range(0,df.shape[0]):
         out.append([j for j in df.iloc[i,:]])
-    print(f'Out final row {out[-1]}') 
+    return out
+
+def createListFromCSV(csv_file_location: os.path, delim:str =',')->list:  
+    '''
+    @return: list from a <csv_file_location>.
+    Argument:
+    @csv_file_location: full path file location and name.
+    '''       
+    df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
+    out = []
+    for i in range(0,df.shape[0]):
+        out.append(df.iloc[i][0])
     return out
 
 def createCSVFromList(pathToSave: os.path, listData:list):
@@ -503,7 +513,7 @@ def getNeighboursValues(raster)-> np.array:
 
 def crop_TifList_WithMaskList(cfg: DictConfig, maskList:os.path):
     '''
-    Given a list of polygons, the algorith find all tif files in the wdir and IF any names match ocurre, the tif is 
+    Given a list of polygons, the algorith find all tif files in the wdir and IF any names match, the tif is 
     cropped with the corresponding mask.
     '''
     wdir = cfg['output_dir']
@@ -528,9 +538,9 @@ def fromDEMtoDataFrame(DEM:os.path,labels:os.path,target:str='percentage',mask:o
     '''
     ## Create features for dataset
     bandsList = DEMFeaturingForMLP_WbT(DEM)
-    ## Extract the band name from the list full path of features. Add column names for coordinates
+    ## Create the list of names for the dataFrame by extracting the band's names from the list of full path. Additionally, create column names for coordinates.
     colList = extractNamesListFromFullPathList(bandsList,['x_coord','y_coord'])
-    ## Build a multiband raster to ensure spatial correlation between features.
+    ## Build a multiband raster to ensure spatial correlation between features at sampling time.
     rasterMultiband = addSubstringToName(DEM,'_features')
     stackBandsInMultibandRaster(bandsList,rasterMultiband)
     ## Crop the multiband raster if needed.
@@ -546,7 +556,7 @@ def fromDEMtoDataFrame(DEM:os.path,labels:os.path,target:str='percentage',mask:o
     df = pd.DataFrame(samplesArr,columns=colList)
     scv_output = replaceExtention(rasterMultiband,'_DSet.csv')
     df.to_csv(scv_output,index=None)
-    # addTargetColsToDatasetCSV()
+    # addTargetColsToDatasetCSV(scv_output,labels,target=target)
     return scv_output
 
 
@@ -840,7 +850,6 @@ def transformShp_IDValue(shpFile, targetField, baseField):
     # Close the shapefile
     shapefile = None
 
-
 ###########################
 ####   PCRaster Tools  ####
 ###########################
@@ -1012,6 +1021,7 @@ def saveIt(dataset, path):
             return path_Reproj,translatedTIff
         else:
             return path,translatedTIff
+
 ######################
 ####   GDAL Tools  ###
 ######################
@@ -1351,6 +1361,7 @@ def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     Simplified version of crop_tif() WORKS well! However, do not perform extra operations like correct NoData or verify crs.
     If you are sure of your inputs and outputs, use it.
     '''
+    print(vectorMask)
     mask_bbox = get_Shpfile_bbox(vectorMask)
     gdal.Warp(outPath, DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
     print(f"Successfully clipped at : {outPath}")
@@ -1701,6 +1712,62 @@ def getRasterValueByCoord(raster1_path, xy) -> np.array:
         idx+=1    
     return samples
 
+def rasterizePolygon(inVector,outRaster,attribute:str='fib'):
+  
+    # Open the data source
+    ds = ogr.Open(inVector)
+    lyr = ds.GetLayer()
+
+    # Create the destination data source
+    x_res = 0.5  # Rasterize to 0.5 meters resolution
+    gtiff_driver = gdal.GetDriverByName('GTiff')
+    out_raster_ds = gtiff_driver.Create(outRaster, lyr.GetExtent()[1] - lyr.GetExtent()[0], lyr.GetExtent()[3] - lyr.GetExtent()[2], 1, gdal.GDT_Byte)
+
+    # Set the geotransform
+    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], x_res, 0, lyr.GetExtent()[3], 0, -x_res))
+
+    # Add a band
+    band = out_raster_ds.GetRasterBand(1)
+    band.SetNoDataValue(0)
+
+    # Rasterize
+    gdal.RasterizeLayer(out_raster_ds, [1], lyr, options=[f"ATTRIBUTE={attribute}"])
+
+    # Close dataset
+    out_raster_ds = None
+
+    # Resample the raster to 1/2 of output resolution
+    input_raster = gdal.Open(outRaster)
+    output_raster = addSubstringToName(outRaster,'_resamp')
+    gdal.Warp(output_raster, input_raster, xRes=x_res/2, yRes=x_res/2, resampleAlg='bilinear')
+
+    # Resample again to the output resolution
+    input_raster = gdal.Open(output_raster)
+    output_raster_final = addSubstringToName(outRaster,'_FinalResamp')
+    gdal.Warp(output_raster_final, input_raster, xRes=x_res, yRes=x_res, resampleAlg='bilinear')
+
+def rasterizePolygonByPixelOverlape(inVector,outRaster,attribute:str='fib'):
+    # Open the data source
+    ds = ogr.Open(inVector)
+    lyr = ds.GetLayer()
+
+    # Create the destination data source
+    x_res = 0.5  # Rasterize to 0.5 meters resolution
+    gtiff_driver = gdal.GetDriverByName('GTiff')
+    out_raster_ds = gtiff_driver.Create(outRaster, lyr.GetExtent()[1] - lyr.GetExtent()[0], lyr.GetExtent()[3] - lyr.GetExtent()[2], 1, gdal.GDT_Byte)
+
+    # Set the geotransform
+    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], x_res, 0, lyr.GetExtent()[3], 0, -x_res))
+
+    # Add a band
+    band = out_raster_ds.GetRasterBand(1)
+    band.SetNoDataValue(0)
+
+    # Rasterize
+    gdal.RasterizeLayer(out_raster_ds, [1], lyr, options=["ATTRIBUTE=fid", "ALL_TOUCHED=TRUE"])
+
+    # Close dataset
+    out_raster_ds = None
 
 ############################
 #### Datacube_ Extract  ####
@@ -1729,27 +1796,37 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
     dict_DcExtract = OmegaConf.create(cfg.dc_Extract_params['dc_extrac_cog'])
     if args is not None:
         dict_DcExtract = updateDict(dict_DcExtract,args)
-    print(f"New dcExtract Dict:  {dict_DcExtract}")
+    # print(f"New dcExtract Dict:  {dict_DcExtract}")
     ##  procede to extraction
     out = instantiate(dict_DcExtract)
-    return out
+    print(f'out from dc_extraction {out[0]}')
+    return out[0]
 
-def multiple_dc_extract_ByPolygonList(cfg: DictConfig):
+def multiple_dc_extract_ByPolygonList(cfg: DictConfig, clipIt:bool=True):
     '''
+    Extract informatin from the Data Cube RNCan. The extraction configuration is providede in cfg. 
+    Optionaly: Clop the extracted file with the polygon providede for the extraction. The Clipped file will be saved in the same folder as the mask, with the same name as the mask, plus the prefix = '_Clip'
     @cfg: DictConfig
     @csvPolygonList
     @Return: True if no error, otherwise dc_extraction tool errors report.
     '''
     polygList = createListFromCSV(cfg.dc_Extract_params['polygonListCSV'])
+
     for polyg in polygList:
+        print(f' recived path : {polyg}')
         if os.path.exists(polyg):
             print(f"Currently working on -> {polyg}")
             _,name,_ = get_parenPath_name_ext(polyg)
             bbox = get_Shpfile_bbox_str(polyg)
             args = {"bbox":bbox,"suffix":name}
-            dc_extraction(cfg,args=args)
+            tifFile = dc_extraction(cfg,args=args)
+            if clipIt:
+                wDir,name,_ = get_parenPath_name_ext(polyg)
+                outFile = os.path.join(wDir,name + "_Cilp.tif")
+                inPath = os.path.join(tifFile)
+                clipRasterByMask(inPath,polyg,outFile)
         else:
-            print(f"Path not found in the ssytem -> {polyg}")
+            print(f"Path not found in the sytem -> {polyg}")
     return True
 
 ######################################
@@ -2227,7 +2304,7 @@ class generalRasterTools():
         dtmFtpList = createListFromCSVColumn(sourcePath_dtm_ftp,csvColumn)
         
         ## Download tails to transit folder
-        downloadTailsToLocalDir(dtmFtpList,transitFolderPath)
+        # downloadTailsToLocalDir(dtmFtpList,transitFolderPath)
         savedWDir = self.workingDir
         resamplerOutput = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
         resamplerOutput_CRS_OK = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
@@ -2748,8 +2825,8 @@ def maxParalelizer(function,args):
     Same as paralelizer, but optimize the pool to the capacity of the current processor.
     NOTE: To be tested
     '''
-    print(args)
-    pool = multiprocessing.Pool(4)
+    # print(args)
+    pool = multiprocessing.Pool()
     result = pool.map(function,args)
     print(result)
 
