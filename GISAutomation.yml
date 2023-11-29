@@ -1,4 +1,4 @@
-name: GISAuto
+name: GISAutom
 channels:
   - conda-forge
 dependencies:
@@ -14,7 +14,7 @@ dependencies:
   - omegaconf
   - hydra-core
   - torchgeo
-  - whitebox_tools
+  # - whitebox_tools
   - qgis
   - PCRaster
   - pyyaml

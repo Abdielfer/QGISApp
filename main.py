@@ -52,11 +52,20 @@ def main(cfg: DictConfig):
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
 
-    allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
-    pathList = U.createListFromCSV(allFloodList)
-    for i in pathList:
-        customFunction(i)
-        break
+    # allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
+    # pathList = U.createListFromCSV(allFloodList)
+    # for i in pathList:
+    #     customFunction(i)
+    #     break
+
+    ### Download, merging and resampling HRDTM tiles ###
+    WbWDir = cfg['output_dir']
+    WbTransf = U.generalRasterTools(WbWDir)
+    aoi1_dtm =r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\HRDEM_DTM_FootPrint\AOI_1_dtm.csv'
+    WbTransf.mosaikAndResamplingFromCSV(aoi1_dtm,1,'Ftp_dtm')
+
+    aoi1_dsm = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\HRDEM_DTM_FootPrint\AOI_1_dtm.csv'
+    WbTransf.mosaikAndResamplingFromCSV(aoi1_dsm,1,'Ftp_dsm')
 
 
 

@@ -1759,8 +1759,10 @@ def multiple_dc_extract_ByPolygonList(cfg: DictConfig):
 ## LocalPaths and global variables: to be adapted to your needs ##
 
 wbt = WhiteboxTools()
-# currentDirectory = os.getcwd()
-# wbt.set_working_dir(currentDirectory)
+
+currentDirectory = os.getcwd()
+wbt.set_whitebox_dir(r'C:\Users\abfernan\.conda\envs\PCRaster\Lib\site-packages\whitebox\WBT')
+wbt.set_working_dir(currentDirectory)
 wbt.set_verbose_mode(True)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
@@ -2188,7 +2190,7 @@ class generalRasterTools():
         verifiedOutpouFileName = checkTifExtention(outputRaster)
         outputFilePathAndName = os.path.join(wbt.work_dir,verifiedOutpouFileName)
         if isinstance(inputRaster, list):
-            inputs = sefl.prepareInputForResampler(inputRaster)
+            inputs = self.prepareInputForResampler(inputRaster)
         else: 
             inputs = inputRaster        
         wbt.resample(
@@ -2201,7 +2203,7 @@ class generalRasterTools():
             )
         return outputFilePathAndName
      
-    def mosaikAndResamplingFromCSV(self,csvName, outputResolution:int, csvColumn:str, clearTransitDir = True):
+    def mosaikAndResamplingFromCSV(self,csvName, outputResolution:int, csvColumn:str, clearTransitDir = False):
         '''
         Just to make things easier, this function download from *csv with list of dtm_url,
          do mosaik and resampling at once. 

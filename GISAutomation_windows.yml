@@ -1,4 +1,4 @@
-name: GISAuto
+name: GISAutom
 channels:
   - conda-forge
   - defaults
