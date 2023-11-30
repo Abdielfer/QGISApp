@@ -22,7 +22,7 @@ def runFunctionInLoop(csvList, function):
     '''
     Given a list <csvList>, excecute the <function> in loop, with one element from the csv as argument, at the time.  
     '''
-    listOfPath = U.createListFromCSV(csvList)
+    listOfPath = U.createListFromCSV_multiplePathPerRow(csvList)
     for path in listOfPath:
         # if os.path.exists(path):
         function(path)
@@ -30,15 +30,17 @@ def runFunctionInLoop(csvList, function):
         #     print(f"Path not found -> {path}")
 
 def customFunction(pathList):
-    dem = pathList[1]
     print('_____________________ New Datase __________________')
+    dem = pathList[0]
     print(f'cdem: {dem}')
-    labels = pathList[0]
+    labels = pathList[1]
     print(f'labels: {labels}')
     samplingArea = pathList[2]
     print(f'samplingArea: {samplingArea}')
     U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
-    
+
+def intFucntion(x):
+    return int(x)    
     
    
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
@@ -48,7 +50,15 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-    pathList = 
+    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\Tif_labels_Mask.csv'
+    # runFunctionInLoop(csvList,customFunction)
+    
+    
+    shpFile = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Kootenay_Creston_2017_ok/Rasterizingtest/TestingRasterizing.shp'
+    # U.transformShp_Value(shpFile,targetField='percentage', baseField= 'percentage', funct=intFucntion)
+
+    out = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Kootenay_Creston_2017_ok/Rasterizingtest/TestingRasterizing_rast.tif'
+    U.rasterizePolygon(shpFile,out,attribute='percentage') 
     
 
 

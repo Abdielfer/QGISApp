@@ -1,6 +1,6 @@
 import os, ntpath
 import glob
-# import pathlib
+import pathlib
 import shutil
 import time
 from time import strftime
@@ -26,7 +26,6 @@ import multiprocessing
 import concurrent.futures
 
 import pcraster as pcr
-from pcraster import *
 
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
@@ -559,7 +558,6 @@ def fromDEMtoDataFrame(DEM:os.path,labels:os.path,target:str='percentage',mask:o
     # addTargetColsToDatasetCSV(scv_output,labels,target=target)
     return scv_output
 
-
 def buildShapefilePointFromCsvDataframe(csvDataframe:os.path, outShepfile:os.path='', EPGS:int=4326):
     '''
     Creates a shapefile of points from a Dataframe <df>. The DataFrame is expected to have a HEADER, and the two first colums with the x_coordinates and y_coordinates respactivelly.
@@ -830,7 +828,12 @@ def getRasterSampleFromPoint(raster,xy):
         bandsArray = data[:, x, y]
     return bandsArray
 
-def transformShp_IDValue(shpFile, targetField, baseField):
+def transformShp_Value(shpFile, targetField, baseField, funct:None):
+    '''
+    Apply the trasnformation <fucnt> to the field <targetField>, passing as fucntion input th value in <baseField>
+
+    '''
+
 # Open the shapefile
     driver = ogr.GetDriverByName('ESRI Shapefile')
     shapefile = driver.Open(shpFile, 1)  # 1 means open in update mode
@@ -842,7 +845,7 @@ def transformShp_IDValue(shpFile, targetField, baseField):
         base_value = feature.GetField(baseField)
         # Determine the <new_value> based on the <base_value>
         # This is where you put your transformation logic
-        new_value = str(base_value)  # replace this with your transformation function
+        new_value = funct(base_value) # replace this with your transformation function
         # Set and Update the value of the Layer's field.
         feature.SetField(targetField, new_value)
         layer.SetFeature(feature)
@@ -1209,12 +1212,12 @@ def extractVectorSpatialReference(file_path):
     data_source.Destroy()
     return spatial_ref
 
-def extractVectorEPSG(shapefile_path):
+def extractVectorEPSG(shapefile_path)-> int:
     '''
     Extract the EPSG value from shapefile spatial reference. 
     '''
     spatial_ref = extractVectorSpatialReference(shapefile_path)
-    return spatial_ref.GetAttrValue('AUTHORITY',1)
+    return int(spatial_ref.GetAttrValue('AUTHORITY',1))
 
 def reprojectShapefile(input_shapefile:os.path, output_shapefile:os.path, target_epsg:int= 3979)->bool:
     '''
@@ -1712,39 +1715,75 @@ def getRasterValueByCoord(raster1_path, xy) -> np.array:
         idx+=1    
     return samples
 
-def rasterizePolygon(inVector,outRaster,attribute:str='fib'):
-  
+def rasterizePolygon(inVector,outRaster,attribute:str='fib', outResol:int=16):
+    '''
+    GRIORA_NearestNeighbour = 0: Nearest neighbour
+    GRIORA_Bilinear = 1: Bilinear (2x2 kernel)
+    GRIORA_Cubic = 2: Cubic Convolution Approximation (4x4 kernel)
+    GRIORA_CubicSpline = 3: Cubic Spline (4x4 kernel)
+    GRIORA_Lanczos = 4: Lanczos windowed sinc interpolation (6x6 kernel)
+    GRIORA_Average = 5: Average
+    GRIORA_Mode = 6: Mode (selects the value which appears most often of all the sampled points)
+    GRIORA_Gauss = 7: Gaussian
+    
+    '''
     # Open the data source
-    ds = ogr.Open(inVector)
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    ds = driver.Open(inVector, 0)
     lyr = ds.GetLayer()
-
+ 
     # Create the destination data source
-    x_res = 0.5  # Rasterize to 0.5 meters resolution
     gtiff_driver = gdal.GetDriverByName('GTiff')
-    out_raster_ds = gtiff_driver.Create(outRaster, lyr.GetExtent()[1] - lyr.GetExtent()[0], lyr.GetExtent()[3] - lyr.GetExtent()[2], 1, gdal.GDT_Byte)
+    arg0 =  int(lyr.GetExtent()[1] - lyr.GetExtent()[0])
+    # print(f'This is arg0 {arg0}')
+    arg1 = int( lyr.GetExtent()[3] - lyr.GetExtent()[2])
+    # print(f'This is arg1 {arg1}')
 
-    # Set the geotransform
-    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], x_res, 0, lyr.GetExtent()[3], 0, -x_res))
-
+    out_raster_ds = gtiff_driver.Create(outRaster,arg0,arg1,1, gdal.GDT_Byte)
+    
+    EPSG = extractVectorEPSG(inVector)
+    output_srs = osr.SpatialReference()
+    output_srs.ImportFromEPSG(EPSG)
+    
+    # Set the geotransform to create a 1m resolutin Raster. This is the best way I found to represetn the vector, without affecting the Raster extention at creation. 
+    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], 1, 0, lyr.GetExtent()[3], 0, -1))
+    
     # Add a band
     band = out_raster_ds.GetRasterBand(1)
-    band.SetNoDataValue(0)
+    band.SetNoDataValue(-9999)
 
     # Rasterize
-    gdal.RasterizeLayer(out_raster_ds, [1], lyr, options=[f"ATTRIBUTE={attribute}"])
-
+    gdal.RasterizeLayer(out_raster_ds,[1],lyr,options=[f"ATTRIBUTE={attribute}"])
     # Close dataset
     out_raster_ds = None
 
-    # Resample the raster to 1/2 of output resolution
-    input_raster = gdal.Open(outRaster)
-    output_raster = addSubstringToName(outRaster,'_resamp')
-    gdal.Warp(output_raster, input_raster, xRes=x_res/2, yRes=x_res/2, resampleAlg='bilinear')
-
     # Resample again to the output resolution
-    input_raster = gdal.Open(output_raster)
-    output_raster_final = addSubstringToName(outRaster,'_FinalResamp')
-    gdal.Warp(output_raster_final, input_raster, xRes=x_res, yRes=x_res, resampleAlg='bilinear')
+    input_raster = gdal.Open(outRaster)
+    output_raster_quartier = addSubstringToName(outRaster,'_quartier')
+    gdal.Warp(output_raster_quartier, input_raster,dstSRS=output_srs, xRes=outResol/4, yRes=outResol/4, resampleAlg=6) # Resampling Method-> Mode = 6
+   
+    input_raster = None
+    input_raster = gdal.Open(output_raster_quartier)
+    output_raster_half = addSubstringToName(outRaster,'_half')
+    gdal.Warp(output_raster_half, input_raster,dstSRS=output_srs, xRes=outResol/2, yRes=outResol/2, resampleAlg=6) # Resampling Method-> Mode = 6
+
+    ### Resample again to the output resolution
+    input_raster = None
+    input_raster = gdal.Open(output_raster_half)
+    output_raster_Mode = addSubstringToName(outRaster,'_fullRess_Mode')
+    gdal.Warp(output_raster_Mode, input_raster,dstSRS=output_srs, xRes=outResol, yRes=outResol, resampleAlg=6) # Resampling Method-> Mode = 6
+
+    ### Resample again to the output resolution
+    input_raster = None
+    input_raster = gdal.Open(output_raster_half)
+    output_raster_NN = addSubstringToName(outRaster,'_fullRess_NN')
+    gdal.Warp(output_raster_NN, input_raster,dstSRS=output_srs, xRes=outResol, yRes=outResol, resampleAlg=0) 
+
+    #### Perform Union
+    input_raster = None
+    output_raster_union = addSubstringToName(outRaster,'_union')
+    rasterUnion(output_raster_Mode,output_raster_NN,output_raster_union)
+
 
 def rasterizePolygonByPixelOverlape(inVector,outRaster,attribute:str='fib'):
     # Open the data source
@@ -1768,6 +1807,34 @@ def rasterizePolygonByPixelOverlape(inVector,outRaster,attribute:str='fib'):
 
     # Close dataset
     out_raster_ds = None
+
+def rasterUnion(raster1Path, raster2Path, rasterUnion):
+    # Open the two raster datasets
+    raster1 = gdal.Open(raster1Path, gdal.GA_ReadOnly)
+    raster2 = gdal.Open(raster2Path, gdal.GA_ReadOnly)
+
+    # Read the rasters as arrays
+    array1 = raster1.ReadAsArray()
+    array2 = raster2.ReadAsArray()
+
+    # Perform the union operation
+    union_array = np.maximum(array1, array2)
+
+    # Create a new raster dataset for the result
+    driver = gdal.GetDriverByName('GTiff')
+    out_raster = driver.Create(rasterUnion, raster1.RasterXSize, raster1.RasterYSize, 1, gdal.GDT_Float32)
+
+    # Write the union array to the new raster dataset
+    out_raster.GetRasterBand(1).WriteArray(union_array)
+    out_raster.SetGeoTransform(raster1.GetGeoTransform())
+    out_raster.SetProjection(raster1.GetProjection())
+
+    # Close the datasets
+    raster1 = None
+    raster2 = None
+    out_raster = None
+    
+    return rasterUnion
 
 ############################
 #### Datacube_ Extract  ####
@@ -1840,7 +1907,7 @@ wbt = WhiteboxTools()
 currentDirectory = os.getcwd()
 wbt.set_whitebox_dir(r'C:\Users\abfernan\.conda\envs\PCRaster\Lib\site-packages\whitebox\WBT')
 wbt.set_working_dir(currentDirectory)
-wbt.set_verbose_mode(True)
+wbt.set_verbose_mode(False)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
     ## Pretraitment #
@@ -1849,6 +1916,7 @@ class WbT_DEM_FeatureExtraction():
      This class contain some functions to generate geomorphological and hydrological features from DEM.
     Functions are based on WhiteBoxTools and Rasterio libraries. For optimal functionality DTM’s most be high resolution, ideally Lidar derived  1m or < 2m. 
     '''
+
     def __init__(self,DEM) -> None:
         print(f"In WbT {type(wbt)}")
         self.parentDir,_,_ = get_parenPath_name_ext(DEM)
@@ -1856,6 +1924,7 @@ class WbT_DEM_FeatureExtraction():
         self.FilledDEM = addSubstringToName(DEM,'_fill')
         wbt.set_working_dir(self.parentDir)
         print(f"Working dir at: {self.parentDir}")    
+        wbt.set_whitebox_dir(r'C:\Users\abfernan\.conda\envs\PCRaster\Lib\site-packages\whitebox\WBT')
 
     def computeSlope(self):
         outSlope = addSubstringToName(self.FilledDEM,'_Slope')
@@ -2458,44 +2527,44 @@ def DEMFeaturingForMLP_WbT(DEM)-> list:
     geomorph = DEM_Features.wbT_geomorphons()
     # replace_no_data_value(geomorph)
     outList.append(geomorph)
-    # print(f"-------------Geomorphons ready at {geomorph}")
-    # ## Flood Order
-    # FloodOrd = DEM_Features.FloodOrder()
-    # replace_no_data_value(FloodOrd)
-    # outList.append(FloodOrd)
-    # print(f"-------------Flood Order ready at {FloodOrd}")
-    # # DEM Filling
-    # DEM_Features.fixNoDataAndfillDTM()
-    # print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
-    # ## Slope
-    # slope = DEM_Features.computeSlope()
-    # outList.append(slope)
-    # print(f"-------------Slope ready at {slope}")
-    # ## Flow direction
-    # D8Pointer = DEM_Features.d8_Pointer() 
-    # print(f"-------------Flow direction ready at {D8Pointer}")
-    # FAcc = DEM_Features.d8_flow_accumulation()
-    # replace_no_data_value(FAcc)
-    # outList.append(FAcc)
-    # print(f"-------------Flow accumulation ready at {FAcc}")
-    # stream = DEM_Features.extract_stream(FAcc)
-    # print(f"-------------Stream ready at {stream}")
-    # strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
-    # print(f"-------------Strahler Order ready at {strahlerOrder}")
-    # mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
-    # print(f"-------------Main river ready at {mainRiver}")
-    # HAND = DEM_Features.WbT_HAND(mainRiver)
-    # outList.append(HAND)
-    # print(f"-------------HAND index ready at {HAND}")
-    # proximity = computeProximity(mainRiver)
-    # outList.append(proximity)
-    # print(f"-------------Proximity index ready at {proximity}")
-    # ## Catchment extraction
-    # DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
-    # ### Save the list of features path as csv. 
-    # csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
-    # createCSVFromList(csvPath,outList)
-    # print(f"--------Features done!----------")
+    print(f"-------------Geomorphons ready at {geomorph}")
+    ## Flood Order
+    FloodOrd = DEM_Features.FloodOrder()
+    replace_no_data_value(FloodOrd)
+    outList.append(FloodOrd)
+    print(f"-------------Flood Order ready at {FloodOrd}")
+    # DEM Filling
+    DEM_Features.fixNoDataAndfillDTM()
+    print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
+    ## Slope
+    slope = DEM_Features.computeSlope()
+    outList.append(slope)
+    print(f"-------------Slope ready at {slope}")
+    ## Flow direction
+    D8Pointer = DEM_Features.d8_Pointer() 
+    print(f"-------------Flow direction ready at {D8Pointer}")
+    FAcc = DEM_Features.d8_flow_accumulation()
+    replace_no_data_value(FAcc)
+    outList.append(FAcc)
+    print(f"-------------Flow accumulation ready at {FAcc}")
+    stream = DEM_Features.extract_stream(FAcc)
+    print(f"-------------Stream ready at {stream}")
+    strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
+    print(f"-------------Strahler Order ready at {strahlerOrder}")
+    mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
+    print(f"-------------Main river ready at {mainRiver}")
+    HAND = DEM_Features.WbT_HAND(mainRiver)
+    outList.append(HAND)
+    print(f"-------------HAND index ready at {HAND}")
+    proximity = computeProximity(mainRiver)
+    outList.append(proximity)
+    print(f"-------------Proximity index ready at {proximity}")
+    ## Catchment extraction
+    DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
+    ### Save the list of features path as csv. 
+    csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
+    createCSVFromList(csvPath,outList)
+    print(f"--------Features done!----------")
     return outList  
 
 # Helpers
