@@ -24,20 +24,18 @@ def runFunctionInLoop(csvList, function):
     '''
     listOfPath = U.createListFromCSV_multiplePathPerRow(csvList)
     for path in listOfPath:
-        # if os.path.exists(path):
+        print(path)
         function(path)
-        # else:
-        #     print(f"Path not found -> {path}")
-
+                
 def customFunction(pathList):
-    print('_____________________ New Datase __________________')
-    dem = pathList[0]
-    print(f'cdem: {dem}')
-    labels = pathList[1]
-    print(f'labels: {labels}')
-    samplingArea = pathList[2]
-    print(f'samplingArea: {samplingArea}')
-    U.fromDEMtoDataFrame(dem,labels,mask=samplingArea)
+    print('_____________________New Raster __________________')
+    labelsTif = pathList[0]
+    mask = pathList[2]
+    featureList = U.createListFromCSV(pathList[1])
+    featureList.append(labelsTif)
+    print(featureList) 
+    U.from_TifList_toDataFrame(featureList,mask)
+   
 
 def intFucntion(x):
     return int(x)    
@@ -50,18 +48,10 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-    # csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\Tif_labels_Mask.csv'
-    # runFunctionInLoop(csvList,customFunction)
     
-    
-    shpFile = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Kootenay_Creston_2017_ok/Rasterizingtest/TestingRasterizing.shp'
-    # U.transformShp_Value(shpFile,targetField='percentage', baseField= 'percentage', funct=intFucntion)
-
-    out = r'C:/Users/abfernan/CrossCanFloodMapping/FloodMappingProjData/HRDTMByAOI/BC_Kootenay_Creston_2017_ok/Rasterizingtest/TestingRasterizing_rast.tif'
-    U.rasterizePolygon(shpFile,out,attribute='percentage') 
-    
-
-
+    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\Full_FloodLabelRasterAndMask.csv'
+    runFunctionInLoop(csvList,customFunction)
+        
 if __name__ == "__main__":
     with U.timeit():
         main()  
@@ -104,3 +94,15 @@ if __name__ == "__main__":
     # allFloodList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\cdem_label_mask.csv'
     # pathList = U.createListFromCSV(allFloodList, delim=';')
     # maxParalelizer(customFunction,pathList)
+
+    #### Create list to csv
+    # subString = 'DSet.csv'
+    # wdr = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI'
+    # listToCSV = U.listALLFilesInDirBySubstring_fullPath(wdr,subString)
+    # csvToSave = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\DatasetNoLabelsList.csv'
+    # U.createCSVFromList(csvToSave,listToCSV)
+
+    ### Rasterize Polygon Multi steps
+    # print(f'-->> {shpFile}')
+    # U.transformShp_Value(shpFile,targetField='percentage', baseField= 'percentage', funct=intFucntion)
+    # U.rasterizePolygonMultiSteps(shpFile,attribute='percentage',burnValue=1) 

@@ -105,7 +105,7 @@ def removeFilesBySubstring(parentPath,subStr:str=''):
     for i in list:
         removeFile(i)
 
-def createTransitFolder(parent_dir_path, folderName:str = 'TransitDir'):
+def createTransitFolder(parent_dir_path, folderName:str = 'TransitDir')->os.path:
     path = os.path.join(parent_dir_path, folderName)
     ensureDirectory(path)
     return path
@@ -215,9 +215,9 @@ def listALLFilesInDirBySubstring_fullPath(cwd, substring = '.csv')->list:
     for (root, _, _) in os.walk(cwd):
         # print(f"Roots {root}")
         localList = listFreeFilesInDirBySubstring_fullPath(root, substring)
-        # print(f"Local List len :-->> {len(localList)}")
+        print(f"Local List len :-->> {len(localList)}")
         fullList.extend(localList) 
-    return fullList
+        return fullList
 
 def createListFromCSV_multiplePathPerRow(csv_file_location: os.path, delim:str =',')-> list[list]:  
     '''
@@ -249,15 +249,9 @@ def createCSVFromList(pathToSave: os.path, listData:list):
     @pathToSave: path of *.csv file to be writed with name and extention.
     @listData: list to be writed. 
     '''
-    parentPath,name,_ = get_parenPath_name_ext(pathToSave)
-    textPath = makePath(parentPath,(name+'.csv'))
-    with open(textPath, 'w') as output:
+    with open(pathToSave, 'w') as output:
         for line in listData:
             output.write(str(line) + '\n')
-    # read_file = pd.read_csv (textPath)
-    # print(f'Creating CSV at {pathToSave}')
-    # read_file.to_csv (pathToSave, index=None)
-    # removeFile(textPath)
     return True
 
 def createListFromCSVColumn(csv_file_location:os.path, col_idx, delim:str =','):  
@@ -667,6 +661,7 @@ def stackBandsInMultibandRaster(input_paths, output_path):
     '''
     src_files_to_mosaic = []
     i = 0
+    ### Update src with all the srs inputs to ensure geospatial coherence. 
     for path in input_paths:
         # print(f'band {i} : {path}')
         i+=1
@@ -684,6 +679,7 @@ def stackBandsInMultibandRaster(input_paths, output_path):
     with rio.open(output_path, "w", **out_meta) as dest:
         for i, file in enumerate(src_files_to_mosaic):
             dest.write(file.read(1), i+1)
+    
 
 def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int = 1):
     if CustomTitle is not None:
@@ -1715,8 +1711,71 @@ def getRasterValueByCoord(raster1_path, xy) -> np.array:
         idx+=1    
     return samples
 
-def rasterizePolygon(inVector,outRaster,attribute:str='fib', outResol:int=16):
+def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='fib', outResol:int=16, burnValue:int=1):
     '''
+    inVector:os.path ,outRaster:os.path,attribute:str='fid', outResol:int=16
+    Rasterize a polygon stepping in from a high resolution to the desired resolution. This method help with a better raster representation of the vector, by capturing all the information a 1m resolution and then downsamling to the desired resolution. The downsampling is based in two algorithms, Mode and Nearest-Neigbour (NN). Each algorith capture a different level of details. The <Mode> takes into account the max frequence to be represented at lower resolution, while the NN capture local information, sometimes isolated and not considered by the Mode. The result is the UNION of both algorithms at the desired <outResol>.
+    @inVector:os.path : Input vector path.
+    @outRaster:os.path: Output raster path.(Optional) If None, the output raster will be saved at the shapefile folder, with the shapefile name.
+    @attribute:str='fid'. feature identifier. To be replaced with the desired field inthe <inVector>
+    @outResol:int=16. Output resolution. (Default=16m)
+    '''
+    parentPath = createTransitFolder(r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data',folderName='resampling')
+    baseRaster = os.path.join(parentPath,'baseRaster.tif')
+    if outRaster:
+        out = outRaster
+    else:
+        parent,name,_ = get_parenPath_name_ext(inVector)
+        out = os.path.join(parent,name+'.tif')
+   
+    # Open the data source
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    ds = driver.Open(inVector, 0)
+    lyr = ds.GetLayer()
+ 
+    # Create the destination data source
+    gtiff_driver = gdal.GetDriverByName('GTiff')
+    x_dimention =  int(lyr.GetExtent()[1] - lyr.GetExtent()[0])
+    y_dimention = int( lyr.GetExtent()[3] - lyr.GetExtent()[2])
+    out_raster_ds = gtiff_driver.Create(baseRaster,x_dimention,y_dimention,1, gdal.GDT_Byte)
+    
+    # Set the geotransform to create a 1m resolutin Raster. This is the best way I found to represent the vector, without affecting the Raster extention at creation. 
+    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], 1, 0, lyr.GetExtent()[3], 0, -1))
+    # Add a band
+    band = out_raster_ds.GetRasterBand(1)
+    band.SetNoDataValue(-9999)
+    ### extract EPSG
+    EPSG = extractVectorEPSG(inVector)
+    output_srs = osr.SpatialReference()
+    output_srs.ImportFromEPSG(EPSG)
+    
+    #### Rasterize
+    gdal.RasterizeLayer(out_raster_ds,[1],lyr,options=[f"ATTRIBUTE={attribute}"])
+    # Close dataset
+    out_raster_ds.FlushCache()
+    
+    #### Resample again to the output resolution by tree steps. A quartier of the full resolution, 
+    output_raster_quartier = addSubstringToName(baseRaster,'_quartier')
+    resampleRaster(baseRaster,output_raster_quartier,outRes=outResol//4,srs=output_srs,algo=6)
+   
+    raster_half = addSubstringToName(baseRaster,'_half')
+    resampleRaster(output_raster_quartier,raster_half,outRes=outResol//2,srs=output_srs,algo=6)
+   
+    raster_NN = addSubstringToName(baseRaster,'_NN')
+    resampleRaster(raster_half,raster_NN,outRes=outResol,srs=output_srs,algo=0)
+
+    raster_Mode = addSubstringToName(baseRaster,'_Mode')
+    resampleRaster(raster_half,raster_Mode,outRes=outResol,srs=output_srs,algo=6)
+    
+    # #### Perform Union
+    rasterUnion(raster_Mode,raster_NN,out,burnValue=burnValue)
+    
+    ### Remove Temporary Files
+    # clearTransitFolderContent(parentPath)
+
+def resampleRaster(inRaster, outRaster,outRes=None,srs=None,EPSG:int=3979, algo:int=1):
+    '''
+    ### Resampling algo values Defailt=1
     GRIORA_NearestNeighbour = 0: Nearest neighbour
     GRIORA_Bilinear = 1: Bilinear (2x2 kernel)
     GRIORA_Cubic = 2: Cubic Convolution Approximation (4x4 kernel)
@@ -1725,90 +1784,26 @@ def rasterizePolygon(inVector,outRaster,attribute:str='fib', outResol:int=16):
     GRIORA_Average = 5: Average
     GRIORA_Mode = 6: Mode (selects the value which appears most often of all the sampled points)
     GRIORA_Gauss = 7: Gaussian
-    
     '''
-    # Open the data source
-    driver = ogr.GetDriverByName('ESRI Shapefile')
-    ds = driver.Open(inVector, 0)
-    lyr = ds.GetLayer()
+    input_raster = gdal.Open(inRaster)
+    geotransform = input_raster.GetGeoTransform()
+    if outRes:
+        resolution_x = outRes
+        resolution_y = outRes
+    else:
+        resolution_x = geotransform[1]
+        resolution_y = abs(geotransform[5])
+
+    if srs:
+        out_dstSRS = srs
+    else: 
+        out_dstSRS = osr.SpatialReference()
+        out_dstSRS.ImportFromEPSG(EPSG)
+
+    gdal.Warp(outRaster, input_raster,dstSRS=out_dstSRS, xRes=resolution_x, yRes=resolution_y, resampleAlg=algo) 
+    input_raster.FlushCache()
  
-    # Create the destination data source
-    gtiff_driver = gdal.GetDriverByName('GTiff')
-    arg0 =  int(lyr.GetExtent()[1] - lyr.GetExtent()[0])
-    # print(f'This is arg0 {arg0}')
-    arg1 = int( lyr.GetExtent()[3] - lyr.GetExtent()[2])
-    # print(f'This is arg1 {arg1}')
-
-    out_raster_ds = gtiff_driver.Create(outRaster,arg0,arg1,1, gdal.GDT_Byte)
-    
-    EPSG = extractVectorEPSG(inVector)
-    output_srs = osr.SpatialReference()
-    output_srs.ImportFromEPSG(EPSG)
-    
-    # Set the geotransform to create a 1m resolutin Raster. This is the best way I found to represetn the vector, without affecting the Raster extention at creation. 
-    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], 1, 0, lyr.GetExtent()[3], 0, -1))
-    
-    # Add a band
-    band = out_raster_ds.GetRasterBand(1)
-    band.SetNoDataValue(-9999)
-
-    # Rasterize
-    gdal.RasterizeLayer(out_raster_ds,[1],lyr,options=[f"ATTRIBUTE={attribute}"])
-    # Close dataset
-    out_raster_ds = None
-
-    # Resample again to the output resolution
-    input_raster = gdal.Open(outRaster)
-    output_raster_quartier = addSubstringToName(outRaster,'_quartier')
-    gdal.Warp(output_raster_quartier, input_raster,dstSRS=output_srs, xRes=outResol/4, yRes=outResol/4, resampleAlg=6) # Resampling Method-> Mode = 6
-   
-    input_raster = None
-    input_raster = gdal.Open(output_raster_quartier)
-    output_raster_half = addSubstringToName(outRaster,'_half')
-    gdal.Warp(output_raster_half, input_raster,dstSRS=output_srs, xRes=outResol/2, yRes=outResol/2, resampleAlg=6) # Resampling Method-> Mode = 6
-
-    ### Resample again to the output resolution
-    input_raster = None
-    input_raster = gdal.Open(output_raster_half)
-    output_raster_Mode = addSubstringToName(outRaster,'_fullRess_Mode')
-    gdal.Warp(output_raster_Mode, input_raster,dstSRS=output_srs, xRes=outResol, yRes=outResol, resampleAlg=6) # Resampling Method-> Mode = 6
-
-    ### Resample again to the output resolution
-    input_raster = None
-    input_raster = gdal.Open(output_raster_half)
-    output_raster_NN = addSubstringToName(outRaster,'_fullRess_NN')
-    gdal.Warp(output_raster_NN, input_raster,dstSRS=output_srs, xRes=outResol, yRes=outResol, resampleAlg=0) 
-
-    #### Perform Union
-    input_raster = None
-    output_raster_union = addSubstringToName(outRaster,'_union')
-    rasterUnion(output_raster_Mode,output_raster_NN,output_raster_union)
-
-
-def rasterizePolygonByPixelOverlape(inVector,outRaster,attribute:str='fib'):
-    # Open the data source
-    ds = ogr.Open(inVector)
-    lyr = ds.GetLayer()
-
-    # Create the destination data source
-    x_res = 0.5  # Rasterize to 0.5 meters resolution
-    gtiff_driver = gdal.GetDriverByName('GTiff')
-    out_raster_ds = gtiff_driver.Create(outRaster, lyr.GetExtent()[1] - lyr.GetExtent()[0], lyr.GetExtent()[3] - lyr.GetExtent()[2], 1, gdal.GDT_Byte)
-
-    # Set the geotransform
-    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], x_res, 0, lyr.GetExtent()[3], 0, -x_res))
-
-    # Add a band
-    band = out_raster_ds.GetRasterBand(1)
-    band.SetNoDataValue(0)
-
-    # Rasterize
-    gdal.RasterizeLayer(out_raster_ds, [1], lyr, options=["ATTRIBUTE=fid", "ALL_TOUCHED=TRUE"])
-
-    # Close dataset
-    out_raster_ds = None
-
-def rasterUnion(raster1Path, raster2Path, rasterUnion):
+def rasterUnion(raster1Path, raster2Path, rasterUnion,burnValue:int=1):
     # Open the two raster datasets
     raster1 = gdal.Open(raster1Path, gdal.GA_ReadOnly)
     raster2 = gdal.Open(raster2Path, gdal.GA_ReadOnly)
@@ -1818,7 +1813,7 @@ def rasterUnion(raster1Path, raster2Path, rasterUnion):
     array2 = raster2.ReadAsArray()
 
     # Perform the union operation
-    union_array = np.maximum(array1, array2)
+    union_array = np.maximum(array1, array2)*burnValue
 
     # Create a new raster dataset for the result
     driver = gdal.GetDriverByName('GTiff')
@@ -1830,9 +1825,9 @@ def rasterUnion(raster1Path, raster2Path, rasterUnion):
     out_raster.SetProjection(raster1.GetProjection())
 
     # Close the datasets
-    raster1 = None
-    raster2 = None
-    out_raster = None
+    raster1.FlushCache()
+    raster2.FlushCache()
+    out_raster.FlushCache()
     
     return rasterUnion
 
@@ -2721,7 +2716,6 @@ def addCollFromVectorFieldToDataFrame(df_In:pd.DataFrame,vector:os.path, field:s
         df_out[colName]=newColValues
     return df_out
 
-
 ######    NOTES   #####
 '''
 list of the built-in color maps in Matplotlib:
@@ -2805,11 +2799,11 @@ def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordin
 
     return values,featuresID
 
-def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percentage', excludeClass:list=['0'])-> os.path:
+def addTargetColsToDatasetCSV(df_csv:os.path,sourceFile:os.path,target:str ='percentage', excludeClass:list=['0'])-> os.path:
     '''
     This function add to a dataset the Target columns. The dataset is provided as *.csv file and save to the same path a new file with perfix = "_withClasses.csv"
     @df_csv: os.path: Path to the *csv file.
-    @shpFile: os.path: Path to the shapefile to sample from.
+    @sourceFile: os.path: Path to the sourceFile to sample from.
     @target:str = target coll name in the dataset.
     @return: os.path: path to the new *.csv containing the dataset. 
     '''
@@ -2819,38 +2813,7 @@ def addTargetColsToDatasetCSV(df_csv:os.path,shpFile:os.path,target:str ='percen
     xy = df.iloc[:,:2].values
     # Sample unique values by coordinates
     with timeit():
-        array, nameList = sampleVectorFieldByUniqueVal_shpfile(shpFile,target,xy)
-        print("Sampling labels END")
-            
-    # Add colls to the dataframe and save it.
-    for name in nameList:
-        if name not in excludeClass: 
-            df[name] = array[:,nameList.index(name)]
-    saveTo = addSubstringToName(df_csv,"_withClasses")
-    print(df.head)
-    df.to_csv(saveTo,index=None)
-    return saveTo 
-
-def addTargetColsToDatasetCSVSimplified(args:dict)-> os.path:
-    '''
-    This function add to a dataset the Target columns. The dataset is provided as *.csv file and save to the same path a new file with perfix = "_withClasses.csv"
-    @df_csv: os.path: Path to the *csv file.
-    @shpFile: os.path: Path to the shapefile to sample from.
-    @target:str = target coll name in the dataset.
-    @return: os.path: path to the new *.csv containing the dataset. 
-    '''
-    df_csv = args['df_csv']
-    shpFile = args['shpFile']
-    target:str ='percentage'
-    excludeClass:list=['0']
-
-    # Read the csv as pd.DataFrame
-    df = pd.read_csv(df_csv)
-    ## Extract x,y pairs array.
-    xy = df.iloc[:,:2].values
-    # Sample unique values by coordinates
-    with timeit():
-        array, nameList = sampleVectorFieldByUniqueVal_shpfile(shpFile,target,xy)
+        array, nameList = sampleVectorFieldByUniqueVal_shpfile(sourceFile,target,xy)
         print("Sampling labels END")
             
     # Add colls to the dataframe and save it.
@@ -2899,3 +2862,32 @@ def maxParalelizer(function,args):
     result = pool.map(function,args)
     print(result)
 
+
+
+####   Replay
+def from_TifList_toDataFrame(bandsList:list,mask:os.path=None, samplingRatio:float=0.1)->os.path:
+    '''
+    Sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
+    '''
+    ## Create the list of names for the dataFrame by extracting the band's names from the list of full path. Additionally, create column names for coordinates.
+    colList = extractNamesListFromFullPathList(bandsList,['x_coord','y_coord'])
+    ## Build a multiband raster to ensure spatial correlation between features at sampling time.
+    DEM = bandsList[0]
+    rasterMultiband = addSubstringToName(DEM,'_FullDataset')
+    stackBandsInMultibandRaster(bandsList,rasterMultiband)
+    ## Crop the multiband raster if needed.
+    if mask:
+        cropped = addSubstringToName(rasterMultiband,'_AOI')
+        raster = clipRasterByMask(rasterMultiband,mask,cropped)
+        replace_no_data_value(raster)
+    else:
+        raster = rasterMultiband
+    ## Random sampling the raster with a density defined by the ratio. This is the more expensive opperation..by patient. 
+    samplesArr = randomSamplingMultiBandRaster(raster,ratio=samplingRatio)
+    ## Build a dataframe with the samples
+    df = pd.DataFrame(samplesArr,columns=colList)
+    scv_output = replaceExtention(rasterMultiband,'.csv')
+    df.to_csv(scv_output,index=None)
+    # buildShapefilePointFromCsvDataframe(scv_output,EPGS=3979)
+    
+    return scv_output
