@@ -680,7 +680,6 @@ def stackBandsInMultibandRaster(input_paths, output_path):
         for i, file in enumerate(src_files_to_mosaic):
             dest.write(file.read(1), i+1)
     
-
 def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int = 1):
     if CustomTitle is not None:
         title = CustomTitle
@@ -808,21 +807,6 @@ def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 1500
                 if sampleCont%1000 == 0:
                     print(f'{sampleCont-1} found') 
     return arrayDataset
-
-def getRasterSampleFromPoint(raster,xy):
-    '''
-    Extract a sample from aa raster given a pari of coordinates xy.
-      NOTE: This function do not make any veryfication.Important to ensure xy coordinates pair comes from the same crs of the raster.
-    @xy: array of coordinates like [x,y].
-    @raster: os.path to the raster to sample
-    @return: a 1D array with the values of all the bands in the <raster> at the coordinates <xy>.
-    '''
-    x,y = xy
-    with rio.open(raster) as src:
-        # Read data from bands into an array
-        data = src.read()
-        bandsArray = data[:, x, y]
-    return bandsArray
 
 def transformShp_Value(shpFile, targetField, baseField, funct:None):
     '''
@@ -1366,6 +1350,15 @@ def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     print(f"Successfully clipped at : {outPath}")
     return outPath
 
+def get_raster_bbox(raster_file):
+    raster = gdal.Open(raster_file)
+    geo_transform = raster.GetGeoTransform()
+    minx = geo_transform[0]
+    maxy = geo_transform[3]
+    maxx = minx + geo_transform[1] * raster.RasterXSize
+    miny = maxy + geo_transform[5] * raster.RasterYSize
+    return [minx, miny, maxx, maxy]
+
 def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
     driver = ogr.GetDriverByName('ESRI Shapefile')
     data_source = driver.Open(file_path, 0)
@@ -1663,53 +1656,51 @@ def getFieldValueFromPolygonByCoordinates(vector_path:os.path, field_name:str, x
     else:
         return []
 
-def getRasterValueByCoord(raster1_path, xy) -> np.array:
-    '''
-    This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value rather one, Z_value rather two]. 
-    The first input raster is used as a reference. 
-    The two rasters are assumed to be in the same CRS but not necessarily with the same resolution. 
-    The algorithm samples the centre of all pixels using the upper-left corner of the first raster as a reference.
-    When you read a raster with GDAL, the raster transformation is represented by a <geotransform>. The geotransform is a six-element tuple that describes the relationship between pixel coordinates and georeferenced coordinates ⁴. The elements of the geotransform are as follows:
-    
-    RASTER Transformation content 
-    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
-    0. x-coordinate of the upper-left corner of the raster
-    1. width of a pixel in the x-direction
-    2. rotation, which is zero for north-up images
-    3. y-coordinate of the upper-left corner of the raster
-    4. rotation, which is zero for north-up images
-    5. height of a pixel in the y-direction (usually negative)
-
-    The geotransform to convert between pixel coordinates and georeferenced coordinates using the following equations:
-
-    x_geo = geotransform[0] + x_pixel * geotransform[1] + y_line * geotransform[2]
-    y_geo = geotransform[3] + x_pixel * geotransform[4] + y_line * geotransform[5]
-
-    `x_pixel` and `y_line` : pixel coordinates of a point in the raster, 
-    `x_geo` and `y_geo` : corresponding georeferenced coordinates.
-
-    In addition, to extract the value in the centre of the pixels, we add 1/2 of width and height respectively.
-    x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
-    y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
-
-    '''    
-    # Get the shape of the rasters
-    # Open raster and get its metadata
-    raster1 = gdal.Open(raster1_path)
-    raster1_band = raster1.GetRasterBand(1)
-    # Create an empty array to store the samples
-    rows = xy.shape[0]
+def getRasterValuesByCoordList(rasterPath, pairCoordList) -> np.array:
+    bbox = get_raster_bbox(rasterPath)
+    rows = pairCoordList.shape[0]
     samples = np.zeros([rows,1])
-    # Loop through the number of samples
-    idx = 0
-    for x,y in xy:
-        # Extract the values from the two rasters at the selected coordinates
-        value1 = raster1_band.ReadAsArray(x, y, 1, 1)[0][0]
-        # Check if neither value is : NoData OR NaN):
-            # Add the values to the samples array
-        samples[idx] = [value1]
-        idx+=1    
+    #----------
+    raster = gdal.Open(rasterPath) 
+    raster_band = raster.GetRasterBand(1)
+    geo_transform = raster.GetGeoTransform()
+    
+    # Get inverted Geo Transformation
+    inv_geo_transform = gdal.InvGeoTransform(geo_transform)
+    idx=0
+    for xy in pairCoordList:
+        if is_point_in_bbox(bbox,xy):
+            x, y = xy
+            col, row = map(int, gdal.ApplyGeoTransform(inv_geo_transform, x, y))
+            samples[idx] = raster_band.ReadAsArray(col, row, 1, 1)[0][0]
+            idx+=1 
+        else:
+            samples[idx] = 0.
+            idx+=1 
     return samples
+
+def get_raster_value_at_coords(raster_file,bbox,coords)-> float:
+    raster = gdal.Open(raster_file) 
+    geo_transform = raster.GetGeoTransform()
+    inv_geo_transform = gdal.InvGeoTransform(geo_transform)
+    raster_band = raster.GetRasterBand(1)
+    x, y = coords
+    col, row = map(int, gdal.ApplyGeoTransform(inv_geo_transform, x, y))
+    if is_point_in_bbox(bbox,coords):
+        return raster_band.ReadAsArray(col, row, 1, 1)[0][0]
+    else:
+        return 0.
+    
+def is_point_in_bbox(bbox, point):
+    '''
+    bbox from must by like = [minx, miny, maxx, maxy]
+    '''
+    minx, miny, maxx, maxy = bbox
+    x, y = point
+    if minx <= x <= maxx and miny <= y <= maxy:
+        return True
+    else:
+        return False
 
 def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='fib', outResol:int=16, burnValue:int=1):
     '''
@@ -1830,6 +1821,7 @@ def rasterUnion(raster1Path, raster2Path, rasterUnion,burnValue:int=1):
     out_raster.FlushCache()
     
     return rasterUnion
+
 
 ############################
 #### Datacube_ Extract  ####
@@ -2686,7 +2678,7 @@ def addCollFromRasterToDataFrame(df_In,map, colName:str='')->pd.DataFrame:
     @return: A dataframe with a column containing the sampling from <map>. 
     '''
     xyCols = df_In.iloc[:, :2].values
-    newColValues = getRasterSampleFromPoint(map,xyCols)
+    newColValues = getRasterValuesByCoordList(map,xyCols)
     df_out = df_In.copy() 
     if colName:
         df_out[colName]=newColValues
@@ -2865,7 +2857,7 @@ def maxParalelizer(function,args):
 
 
 ####   Replay
-def from_TifList_toDataFrame(bandsList:list,mask:os.path=None, samplingRatio:float=0.1)->os.path:
+def from_TifList_toDataFrame(bandsList:list,labels:os.path=None,mask:os.path=None, samplingRatio:float=0.1)->os.path:
     '''
     Sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
     '''
@@ -2886,8 +2878,9 @@ def from_TifList_toDataFrame(bandsList:list,mask:os.path=None, samplingRatio:flo
     samplesArr = randomSamplingMultiBandRaster(raster,ratio=samplingRatio)
     ## Build a dataframe with the samples
     df = pd.DataFrame(samplesArr,columns=colList)
+    df = addCollFromRasterToDataFrame(df,labels,'Labels')
     scv_output = replaceExtention(rasterMultiband,'.csv')
+    print(df.head())
     df.to_csv(scv_output,index=None)
     # buildShapefilePointFromCsvDataframe(scv_output,EPGS=3979)
-    
     return scv_output

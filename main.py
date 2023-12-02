@@ -32,9 +32,7 @@ def customFunction(pathList):
     labelsTif = pathList[0]
     mask = pathList[2]
     featureList = U.createListFromCSV(pathList[1])
-    featureList.append(labelsTif)
-    print(featureList) 
-    U.from_TifList_toDataFrame(featureList,mask)
+    U.from_TifList_toDataFrame(featureList,labelsTif,mask)
    
 
 def intFucntion(x):
