@@ -22,6 +22,11 @@ from osgeo.gdalconst import *
 import geopandas as gpd
 gdal.UseExceptions()
 
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.metrics import confusion_matrix
+from collections import Counter
+from imblearn.under_sampling import RandomUnderSampler 
+
 import multiprocessing
 import concurrent.futures
 
@@ -401,6 +406,236 @@ def isCoordPairInArray(arr, pair) ->bool:
     out = np.any(arr[np.where(arr[:,0]==x),1] == y)
     return out
 
+def reorder_dataframe_columns(df, new_order)->pd.DataFrame:
+    """
+    Reorder the columns of a DataFrame.
+    Parameters:
+    df (pd.DataFrame): The original DataFrame
+    new_order (list): A list of column names in the desired order
+    Returns:
+    pd.DataFrame: A DataFrame with reordered columns
+    """
+    df = df[new_order]
+    return df
+
+def reorder_list(lst, new_order):
+    """
+    Reorder the elements of a list.
+    Parameters:
+    lst (list): The original list
+    new_order (list): A list of indices in the desired order
+    Returns:
+    list: A list with reordered elements
+    """
+    return [lst[i] for i in new_order]
+
+
+############################            
+### Dataset Manipulation ###
+############################
+def importDataSet(csvPath, targetCol: str, colsToDrop:list=None)->pd.DataFrame:
+    '''
+    Import datasets and return         
+    @csvPath: DataSetName => The dataset path as *csv file. 
+    @Output: Features(x) and tragets(y) 
+    ''' 
+    x  = pd.read_csv(csvPath, index_col = None)
+    # print(x.columns)
+    y = x[targetCol]
+    x.drop([targetCol], axis=1, inplace = True)
+    if colsToDrop is not None:
+        # print(x.columns)
+        x.drop(colsToDrop, axis=1, inplace = True)
+        # print(x.columns)
+    return x, y
+
+def randomUndersampling(x_DataSet, y_DataSet, sampling_strategy = 'auto'):
+    sm = RandomUnderSampler(random_state=50, sampling_strategy=sampling_strategy)
+    x_res, y_res = sm.fit_resample(x_DataSet, y_DataSet)
+    print('Resampled dataset shape %s' % Counter(y_res))
+    return x_res, y_res
+
+def extractFloodClassForMLP(csvPath):
+    '''
+    THis function asume the last colum of the dataset are the lables
+    
+    The goal is to create separated Datasets with classes 1 and 5 from the input csv. 
+    The considered rule is: 
+        Class_5: all class 5.
+        Class_1: All classes, since they are inclusive. All class 5 are also class 5. 
+    '''
+    dfOutputC1= None
+    dfOutputC5 = None
+    df = pd.read_csv(csvPath,index_col = None)
+    print(df.head())
+    labelsName = df.columns[-1]
+    labels= df.iloc[:,-1]
+    uniqueClasses = pd.unique(labels)
+    if 1 in uniqueClasses:
+        class1_Col = [1 if i!= 0 else 0 for i in labels]
+        df[labelsName] = class1_Col
+        dfOutputC1 = addSubstringToName(csvPath,'_RawClass1')
+        df.to_csv(dfOutputC1,index=None)
+
+    if 5 in uniqueClasses:
+        class5_Col = [1 if i == 5 else 0 for i in labels]
+        df[labelsName] = class5_Col
+        dfOutputC5 = addSubstringToName(csvPath,'_RawClass5')
+        df.to_csv(dfOutputC5,index=None)
+    
+    return dfOutputC1,dfOutputC5
+
+def buildBalanceStratifiedDatasetByClasses(DatasetList):
+    '''
+    Crete stratified and balanced dataset from a series of datasets. The inputs are datasets with classes 1 and/or 5. 
+    @Create:
+        - A balanced Dataset by individual input, at the same address than the input dataset. 
+        - Datasets of training and validation for each class, with a concatenation of the corresponding indivudual datasets. Saved at <wDir> folder. NOTE: Ensure wDir exist.  
+    
+    @Return: True if everything is OK. Otherwise, a fucntion error. 
+    '''
+    wDri = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling'
+    
+    ####   Empty Dataset creation 
+    class1_Full_Training = pd.DataFrame()
+    class1_Full_Validation = pd.DataFrame()
+    class5_Full_Training = pd.DataFrame()
+    class5_Full_Validation = pd.DataFrame()
+    print(len(DatasetList))
+    Aoi_ID = 1
+    aoi_nameIDList = []
+    for csvPath in DatasetList:
+        _,Name,_ = get_parenPath_name_ext(csvPath)
+        aoi_nameIDList.append(str(f"{Aoi_ID} - {Name}"))
+        print('_____________________New Dataset __________________')
+        print(f"---- {csvPath}")
+        ### Split in Class1 And Class5 and Save It.
+        Class1,Class5 = extractFloodClassForMLP(csvPath)
+        if Class1 is not None:
+            ##### Stratified Sampling per Class
+                        ###  Class 1
+            X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class1,'Labels')
+                # Create balanced Dataset and Save it
+            trainSetClass1 = addSubstringToName(Class1,'_balanceTrain')
+            class1_X_Train = X_train
+            class1_X_Train['Labels'] = y_train
+            class1_X_Train['Aoi_Id'] = Aoi_ID
+            class1_X_Train.to_csv(trainSetClass1,index = None)
+            class1_Full_Training = pd.concat([class1_Full_Training,class1_X_Train], ignore_index=True)
+            
+            ValSetClass1 = addSubstringToName(Class1,'_balanceValid')
+            class1_X_Val = X_test
+            class1_X_Val['Labels'] = y_test
+            class1_X_Val['Aoi_Id'] = Aoi_ID
+            class1_X_Val.to_csv(ValSetClass1,index = None)
+            class1_Full_Validation = pd.concat([class1_Full_Validation,class1_X_Val], ignore_index=True)
+            Class1 = None
+    
+        if Class5 is not None:   
+            ###  Class 5
+            X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class5,'Labels')
+                # Create balanced Dataset and Save it
+            trainSetClass5 = addSubstringToName(Class5,'_balanceTrain')
+            class5_X_Train = X_train
+            class5_X_Train['Labels'] = y_train
+            class5_X_Train['Aoi_Id'] = Aoi_ID
+            class5_X_Train.to_csv(trainSetClass5,index = None)
+            class5_Full_Training = pd.concat([class5_Full_Training,class5_X_Train], ignore_index=True)
+
+            ValSetClass5 = addSubstringToName(Class5,'_balanceValid')
+            class5_X_Val = X_test
+            class5_X_Val['Labels'] = y_test
+            class5_X_Val['Aoi_Id'] = Aoi_ID
+            class5_X_Val.to_csv(ValSetClass5,index = None)
+            class5_Full_Validation = pd.concat([class5_Full_Validation,class5_X_Val], ignore_index=True)
+            Class5 = None
+        Aoi_ID+=1
+
+    C1_Full_Train = os.path.join(wDri,'class1_Full_Training.csv')
+    class1_Full_Training.to_csv(C1_Full_Train,index=None)
+
+    C1_Full_Validation = os.path.join(wDri,'class1_Full_Validation.csv')
+    class1_Full_Validation.to_csv(C1_Full_Validation,index=None)
+    
+    C2_Full_Train = os.path.join(wDri,'class5_Full_Training.csv')
+    class5_Full_Training.to_csv(C2_Full_Train,index=None)
+
+    C5_Full_Validation = os.path.join(wDri,'class5_Full_Validation.csv')
+    class5_Full_Validation.to_csv(C5_Full_Validation,index=None)
+
+    C5_Full_Validation = os.path.join(wDri,'Aoi_ID_Name_List.csv')
+    createCSVFromList(C5_Full_Validation,aoi_nameIDList)
+    return True
+
+def stratifiedSplit(dataSetName, targetColName):
+    '''
+    Performe a sampling that preserve classses proportions on both, train and test sets.
+    '''
+    X,Y = importDataSet(dataSetName, targetColName)
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=50)
+    for train_index, test_index in sss.split(X, Y):
+        print("TRAIN:", train_index.size, "TEST:", test_index)
+        X_train = X.iloc[train_index]
+        y_train = Y.iloc[train_index]
+        X_test = X.iloc[test_index]
+        y_test = Y.iloc[test_index]
+    return X_train, y_train, X_test, y_test
+
+def stratifiedSplit_WithRandomBalanceUndersampling(dataSetName, targetColName):
+    '''
+    Performe a sampling that preserve classses proportions on both, train and test sets.
+    ALso the result is a balanced dataset, with the majority classes undersampled to the number of minority class. 
+    '''
+    DS_X, DS_Y = importDataSet(dataSetName, targetColName)
+    X, Y = randomUndersampling(DS_X, DS_Y)
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=50)
+    for train_index, test_index in sss.split(X, Y):
+        print("TRAIN:", train_index.size, "TEST:", test_index)
+        X_train = X.iloc[train_index]
+        y_train = Y.iloc[train_index]
+        X_test = X.iloc[test_index]
+        y_test = Y.iloc[test_index]
+    return X_train, y_train, X_test, y_test
+
+
+def removeCoordinatesFromDataSet(dataSet):
+    '''
+    Remove colums of coordinates if they exist in dataset
+    @input:
+      @dataSet: pandas dataSet
+    '''
+    DSNoCoord = dataSet
+    if 'x_coord' in DSNoCoord.keys(): 
+      DSNoCoord.drop(['x_coord','y_coord'], axis=1, inplace = True)
+    else: 
+      print("DataSet has no coordinates to remove")
+    return DSNoCoord
+
+def transformDatasets(cfg):
+    '''
+    This fucntion takes a list of dataset as *csv paths and apply a transformation in loop. You can custom your transformation to cover your needs. 
+    @cfg:DictConfig: The input must be a Hydra configuration lile, containing the key = datasetsList to a csv with the addres of all *.cvs file to process.  
+    '''
+    DatasetsPath = cfg.datasetsList
+    listOfDatsets = createListFromCSV(DatasetsPath)
+    for file in listOfDatsets:
+        X,Y = importDataSet(file, targetCol='Labels')
+        x_dsUndSamp, Y_dsUndSamp = randomUndersampling(X,Y)
+        x_dsUndSamp['Labels'] = Y_dsUndSamp.values
+        NewFile = addSubstringToName(file,'_balanced')
+        x_dsUndSamp.to_csv(NewFile, index=None)
+    pass
+
+def DFOperation_removeNegative(DF:pd.DataFrame,colName):
+    '''
+    NOTE: OPPERATIONS ARE MADE IN PLACE!!!
+    Remove all row index in the collumn <colName> if the value is negative
+    '''
+    DF = DF[DF.colName>=0]
+    return DF
+
+
+
 ###################            
 ### General GIS ###
 ###################
@@ -695,7 +930,15 @@ def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> 
     '''
     rasterData,profil = readRasterWithRasterio(rasterPath)
     NOData = profil['nodata']
-    rasterDataNan = np.where(((rasterData == NOData)|(rasterData == extraNoDataVal)), np.nan, rasterData) 
+    rasterDataNan = np.where(((rasterData == NOData)|(rasterData == extraNoDataVal)), np.nan, rasterData)
+    return rasterDataNan
+
+def replaceRastNegativesWithNan(rasterPath:os.path)-> np.array:
+    '''
+    Retrun the raster array with np.Nan where raster is NoData 
+    '''
+    rasterData,_ = readRasterWithRasterio(rasterPath)
+    rasterDataNan = np.where((rasterData<0), np.nan, rasterData) 
     return rasterDataNan
 
 def updateNoDataValue_Rio(input_path, output_path, nodata_value):
@@ -1417,7 +1660,7 @@ def computeRelativeElevation(dem) -> os.path:
     ## Replace NoData with -9999 in place. Ensure valid operations. 
     dataset = gdal.Open(dem, 0)
     # replace_no_data_value(dem)
-    arrayNoNan = replaceRastNoDataWithNan(dem)
+    arrayNoNan = replaceRastNegativesWithNan(dem)
     dataMin = np.nanmin(arrayNoNan)
     print(dataMin)
     relativeElevationArray = np.subtract(arrayNoNan,dataMin)
