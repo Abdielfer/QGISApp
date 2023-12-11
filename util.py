@@ -1,4 +1,4 @@
-import os, ntpath
+import os, ntpath, sys
 import glob
 import pathlib
 import shutil
@@ -401,8 +401,6 @@ def isCoordPairInArray(arr, pair) ->bool:
     out = np.any(arr[np.where(arr[:,0]==x),1] == y)
     return out
 
-
-
 ###################            
 ### General GIS ###
 ###################
@@ -692,6 +690,9 @@ def plotHistogram(raster, CustomTitle:str = None, bins: int=50, bandNumber: int 
     return True
 
 def replaceRastNoDataWithNan(rasterPath:os.path,extraNoDataVal: float = None)-> np.array:
+    '''
+    Retrun the raster array with np.Nan where raster is NoData 
+    '''
     rasterData,profil = readRasterWithRasterio(rasterPath)
     NOData = profil['nodata']
     rasterDataNan = np.where(((rasterData == NOData)|(rasterData == extraNoDataVal)), np.nan, rasterData) 
@@ -770,7 +771,7 @@ def normalize_raster(inputRaster):
                 dst.write(normalized_data, i)
     return outputRaster
 
-def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 150000)-> np.array:
+def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 140000)-> np.array:
     '''
     Given a multiband raster, the algorith, takes a random number of saples and retur in np.array format. 
     The samples are ONLY VALID points according the criteria of been not NODataValue. (bandsArray[0]!= NoData and bandsArray[0] != np.NAN)
@@ -800,7 +801,7 @@ def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 1500
             ## Extract banda values as vector
             bandsArray = data[:, i, j]
             # Check if neither value is NoData OR NaN in the first band (DEM)
-            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN and bandsArray[0] != 0) and not isCoordPairInArray(arrayDataset,xy):
+            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN and bandsArray[0] >= 0) and not isCoordPairInArray(arrayDataset,xy):
                 # Add the sample to the dataset
                 arrayDataset[sampleCont] = np.concatenate((xy, bandsArray))
                 sampleCont+=1
@@ -1044,7 +1045,7 @@ class RasterGDAL():
         self.NoData = self.band1.GetNoDataValue()
 
     def setDirGDAL(self, path ):
-        os.chdir()
+        os.chdir(path)
     
     def getRasterDataset(self):
         return self.ds 
@@ -1407,6 +1408,38 @@ def computeProximity(inRaster, value:int= 1, outPath:os.path = None) -> os.path:
     del ds, out_ds
     return outPath
 
+def computeRelativeElevation(dem) -> os.path:
+    '''
+    Compute relative elevation by substracting the minimum value of a raster to all pixels.
+    @dem: Raster of elevation. Expected 1-band raster.
+    @return: The path to the relative elevation raster. The new raster will be saved at the same path of <dem> with prefix "_RelElev".
+    '''
+    ## Replace NoData with -9999 in place. Ensure valid operations. 
+    dataset = gdal.Open(dem, 0)
+    # replace_no_data_value(dem)
+    arrayNoNan = replaceRastNoDataWithNan(dem)
+    dataMin = np.nanmin(arrayNoNan)
+    print(dataMin)
+    relativeElevationArray = np.subtract(arrayNoNan,dataMin)
+  
+    # Create a new raster dataset for the result
+    driver = gdal.GetDriverByName('GTiff')
+    relativeElevationPath = addSubstringToName(dem,'_RelElev')
+    out_raster = driver.Create(relativeElevationPath, dataset.RasterXSize, dataset.RasterYSize, 1, gdal.GDT_Float32)
+
+    # Write the union array to the new raster dataset
+    if len(relativeElevationArray.shape) >2:
+        relativeElevationArray = relativeElevationArray[0]
+    print(relativeElevationArray.shape)
+    out_raster.GetRasterBand(1).WriteArray(relativeElevationArray)
+    out_raster.SetGeoTransform(dataset.GetGeoTransform())
+    out_raster.SetProjection(dataset.GetProjection())
+
+    # Close the datasets
+    dataset.FlushCache()
+    
+    return relativeElevationPath
+
 def getNeighborsGDAL(raster_file, shape_file):
     """
     This function takes a raster and a shapefile as input and returns an array containing
@@ -1759,7 +1792,7 @@ def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='
     resampleRaster(raster_half,raster_Mode,outRes=outResol,srs=output_srs,algo=6)
     
     # #### Perform Union
-    rasterUnion(raster_Mode,raster_NN,out,burnValue=burnValue)
+    rasterBinaryUnion(raster_Mode,raster_NN,out,burnValue=burnValue)
     
     ### Remove Temporary Files
     # clearTransitFolderContent(parentPath)
@@ -1794,7 +1827,11 @@ def resampleRaster(inRaster, outRaster,outRes=None,srs=None,EPSG:int=3979, algo:
     gdal.Warp(outRaster, input_raster,dstSRS=out_dstSRS, xRes=resolution_x, yRes=resolution_y, resampleAlg=algo) 
     input_raster.FlushCache()
  
-def rasterUnion(raster1Path, raster2Path, rasterUnion,burnValue:int=1):
+def rasterBinaryUnion(raster1Path, raster2Path, rasterUnion,burnValue:int=1):
+    '''
+    Compute the union betwee two binary raster. The union process return a new binary raster, whith all pixell of value 1 tha are present in at least one of the two input raster.
+    
+    '''
     # Open the two raster datasets
     raster1 = gdal.Open(raster1Path, gdal.GA_ReadOnly)
     raster2 = gdal.Open(raster2Path, gdal.GA_ReadOnly)
@@ -1821,7 +1858,6 @@ def rasterUnion(raster1Path, raster2Path, rasterUnion,burnValue:int=1):
     out_raster.FlushCache()
     
     return rasterUnion
-
 
 ############################
 #### Datacube_ Extract  ####
@@ -1890,7 +1926,6 @@ def multiple_dc_extract_ByPolygonList(cfg: DictConfig, clipIt:bool=True):
 ## LocalPaths and global variables: to be adapted to your needs ##
 
 wbt = WhiteboxTools()
-
 currentDirectory = os.getcwd()
 wbt.set_whitebox_dir(r'C:\Users\abfernan\.conda\envs\PCRaster\Lib\site-packages\whitebox\WBT')
 wbt.set_working_dir(currentDirectory)
@@ -2508,7 +2543,7 @@ def DEMFeaturingForMLP_WbT(DEM)-> list:
     '''
     outList = [DEM]
     DEM_Features = WbT_DEM_FeatureExtraction(DEM)
-    print(type(DEM_Features))
+    
     print(f"Extracting features from DEM >>>>")
     # Geomorphons
     geomorph = DEM_Features.wbT_geomorphons()
@@ -2853,8 +2888,6 @@ def maxParalelizer(function,args):
     pool = multiprocessing.Pool()
     result = pool.map(function,args)
     print(result)
-
-
 
 ####   Replay
 def from_TifList_toDataFrame(bandsList:list,labels:os.path=None,mask:os.path=None, samplingRatio:float=0.1)->os.path:

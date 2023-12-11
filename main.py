@@ -34,7 +34,6 @@ def customFunction(pathList):
     featureList = U.createListFromCSV(pathList[1])
     U.from_TifList_toDataFrame(featureList,labelsTif,mask)
    
-
 def intFucntion(x):
     return int(x)    
     
@@ -46,10 +45,22 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
+
+
+    # subString = '_Clean.csv'
+    # wdr = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI'
+    # listToCSV = U.listALLFilesInDirBySubstring_fullPath(wdr,subString)
+    # csvToSave = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\FullDatasetsList_Cleaned.csv'
+    # U.createCSVFromList(csvToSave,listToCSV)
     
-    csvList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\Full_FloodLabelRasterAndMask.csv'
-    runFunctionInLoop(csvList,customFunction)
-        
+    ### Compute relative elevation
+    demList = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\ListOfBasinsCdem16mTif.csv'
+    tifList = U.createListFromCSV(demList)
+    
+    for dem in tifList:
+        U.computeRelativeElevation(dem)
+
+
 if __name__ == "__main__":
     with U.timeit():
         main()  
@@ -93,7 +104,7 @@ if __name__ == "__main__":
     # pathList = U.createListFromCSV(allFloodList, delim=';')
     # maxParalelizer(customFunction,pathList)
 
-    #### Create list to csv
+    #### Create list of files by substring and save it to csv
     # subString = 'DSet.csv'
     # wdr = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI'
     # listToCSV = U.listALLFilesInDirBySubstring_fullPath(wdr,subString)
