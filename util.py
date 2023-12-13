@@ -21,7 +21,7 @@ from osgeo import gdal_array
 from osgeo.gdalconst import *
 import geopandas as gpd
 gdal.UseExceptions()
-
+ 
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import confusion_matrix
 from collections import Counter
@@ -597,7 +597,6 @@ def stratifiedSplit_WithRandomBalanceUndersampling(dataSetName, targetColName):
         y_test = Y.iloc[test_index]
     return X_train, y_train, X_test, y_test
 
-
 def removeCoordinatesFromDataSet(dataSet):
     '''
     Remove colums of coordinates if they exist in dataset
@@ -633,7 +632,6 @@ def DFOperation_removeNegative(DF:pd.DataFrame,colName):
     '''
     DF = DF[DF.colName>=0]
     return DF
-
 
 
 ###################            
@@ -1590,9 +1588,60 @@ def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     '''
     print(vectorMask)
     mask_bbox = get_Shpfile_bbox(vectorMask)
-    gdal.Warp(outPath, DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
+    gdal.Warp(outPath,DEMPath,outputBounds=mask_bbox,cutlineDSName=vectorMask, cropToCutline=True)
     print(f"Successfully clipped at : {outPath}")
     return outPath
+
+def crop_raster_with_rasterMask(raster_path, mask_raster_path, output_path):
+    '''
+    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
+    0. x-coordinate of the upper-left corner of the raster
+    1. width of a pixel in the x-direction
+    2. rotation, which is zero for north-up images
+    3. y-coordinate of the upper-left corner of the raster
+    4. rotation, which is zero for north-up images
+    5. height of a pixel in the y-direction (usually negative)
+    '''    
+    # Open the raster files
+    raster = gdal.Open(raster_path)
+    mask_raster = gdal.Open(mask_raster_path)
+
+    # Get the orgin and dimentions from mask_raster. 
+    mask_gt = mask_raster.GetGeoTransform()
+    xOrigin = mask_gt[0]
+    yOrigin = mask_gt[3]
+    pixelWidth = mask_raster.RasterXSize
+    pixelHeight = mask_raster.RasterYSize
+    
+    ### Get the coordinates of origin from mask into raster space. 
+    raster_Geotransform = raster.GetGeoTransform()
+    inv_geo_transform = gdal.InvGeoTransform(raster_Geotransform)
+    col, row = map(int, gdal.ApplyGeoTransform(inv_geo_transform, xOrigin, yOrigin))
+    
+    ### Crop raster from origin = (col, row) for dimentions (pixelWidth, pixelHeight)
+    crop = raster.ReadAsArray(col, row, pixelWidth, pixelHeight)
+    
+    # Create the output raster file
+    tiff_driver = gdal.GetDriverByName('GTiff')
+    output_raster  = tiff_driver.Create(output_path,mask_raster.RasterXSize,mask_raster.RasterYSize,1, gdal.GDT_Float32)
+
+    # Set the geotransform and projection on the output raster
+    new_gt = list(mask_raster.GetGeoTransform())
+    new_gt[0] = mask_gt[0]
+    new_gt[3] = mask_gt[3]
+    output_raster.SetGeoTransform(new_gt)
+    output_raster.SetProjection(mask_raster.GetProjection())
+
+    # Write the cropped array to the output raster
+    output_band = output_raster.GetRasterBand(1)
+    output_band.WriteArray(crop)
+
+    # Close the raster files
+    raster = None
+    mask_raster = None
+    output_raster = None
+    
+    return output_path
 
 def get_raster_bbox(raster_file):
     raster = gdal.Open(raster_file)
@@ -1605,7 +1654,7 @@ def get_raster_bbox(raster_file):
 
 def get_Shpfile_bbox(file_path) -> Tuple[float, float, float, float]:
     driver = ogr.GetDriverByName('ESRI Shapefile')
-    data_source = driver.Open(file_path, 0)
+    data_source = driver.Open(file_path, GA_ReadOnly)
     layer = data_source.GetLayer()
     extent = layer.GetExtent()
     min_x, max_x, min_y, max_y = extent
@@ -2040,6 +2089,32 @@ def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='
     ### Remove Temporary Files
     # clearTransitFolderContent(parentPath)
 
+def raster_to_vector(raster_path, output_vector_path) -> os.path:
+    # Open the raster file
+    raster = gdal.Open(raster_path, 0)
+
+    band = raster.GetRasterBand(1)
+    array = band.ReadAsArray()
+    print(array.shape)
+
+    # Create a new vector layer in memory
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    dst_ds = driver.CreateDataSource(output_vector_path)
+    dst_layer = dst_ds.CreateLayer('polygonized', srs = None)
+
+    # Add a new field to the layer
+    new_field = ogr.FieldDefn('DN', ogr.OFTInteger)
+    dst_layer.CreateField(new_field)
+
+    # Perform the raster to vector conversion
+    gdal.Polygonize(band, None, dst_layer, 0, [], callback=None)
+
+    # Close the raster file
+    raster = None
+    dst_ds = None
+    
+    return output_vector_path
+
 def resampleRaster(inRaster, outRaster,outRes=None,srs=None,EPSG:int=3979, algo:int=1):
     '''
     ### Resampling algo values Defailt=1
@@ -2101,6 +2176,66 @@ def rasterBinaryUnion(raster1Path, raster2Path, rasterUnion,burnValue:int=1):
     out_raster.FlushCache()
     
     return rasterUnion
+
+def DatumCorrection(raster,Datum):
+    '''
+    Add a verticatl correction to a DEM/DTM tile by a corresponding Datum. 
+    - Extract input raster BBox. 
+    - Extract the Datum subset and storage it in a temporary file.
+    - Proced to correction (Tile + Datum) Raster opperatin
+    - Save corrected tile with prefix "_ellip" (From ellipsoidal)
+    - Remove temporary Datum tile. 
+    '''
+    ## Extract the Datum subset and storage it in a temporary file.
+    DatumTile = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\DatumTemporaryTile.tif'
+    crop_raster_with_rasterMask(Datum,raster,DatumTile)
+    # DatumTile_16m = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\DatumTemporaryTile_16m.tif'
+    # resampleRaster(DatumTile,DatumTile_16m,outRes=16)
+    # # Proced to correction (Tile + Datum) Raster opperatin &  Save corrected tile with prefix "_ellip" (From ellipsoidal)
+    # corectedTileName = addSubstringToName(raster,'_Ellip')
+    # raster_sum(raster,DatumTile_16m,corectedTileName)
+    # # Remove temporary Datum tile. 
+    # removeFile([DatumTile])
+    # return corectedTileName
+
+    
+def raster_sum(raster1_path, raster2_path, output_path):
+    '''
+    This functionm sum two rasters. The output takes the information from the first raster.
+    @raster1_path, @raster2_path: Path to the imput rasters.  
+    @output_path: Path to the output rasters.
+    '''
+    # Open the raster files
+    raster1 = gdal.Open(raster1_path)
+    raster2 = gdal.Open(raster2_path)
+
+    # Read the raster files as arrays
+    array1 = raster1.ReadAsArray()
+    array2 = raster2.ReadAsArray()
+
+    # Perform the calculation
+    result_array = array1 + array2
+
+    # Get the geotransform and projection from the input raster 1
+    geotransform = raster1.GetGeoTransform()
+    projection = raster1.GetProjection()
+
+    # Create the output raster file
+    driver = gdal.GetDriverByName('GTiff')
+    output_raster = driver.Create(output_path, raster1.RasterXSize, raster1.RasterYSize, 1, gdal.GDT_Float32)
+
+    # Set the geotransform and projection on the output raster
+    output_raster.SetGeoTransform(geotransform)
+    output_raster.SetProjection(projection)
+
+    # Write the result array to the output raster
+    output_band = output_raster.GetRasterBand(1)
+    output_band.WriteArray(result_array)
+
+    # Close the raster files
+    raster1 = None
+    raster2 = None
+    output_raster = None
 
 ############################
 #### Datacube_ Extract  ####

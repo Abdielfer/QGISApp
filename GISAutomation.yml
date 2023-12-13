@@ -21,3 +21,4 @@ dependencies:
   - qgis
   - PCRaster
   - pyyaml
+  - imbalanced-learn

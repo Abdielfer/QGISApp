@@ -21,72 +21,8 @@ def logger(cfg: DictConfig, nameByTime):
     # logging.info(f"dc_extract inputs: {cfg.dc_Extract_params.dc_extrac_cog}")
        
 def customFunction(DatasetList):
-    '''
-     
-    '''
-    wDri = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling'
-    
-    ####   Empty Dataset creation 
-    class1_Full_Training = pd.DataFrame()
-    class1_Full_Validation = pd.DataFrame()
-    class5_Full_Training = pd.DataFrame()
-    class5_Full_Validation = pd.DataFrame()
-    print(len(DatasetList))
 
-    for csvPath in DatasetList:
-        print('_____________________New Dataset __________________')
-        print(f"---- {csvPath}")
-        ### Split in Class1 And Class5 and Save It.
-        Class1,Class5 = U.extractFloodClassForMLP(csvPath)
-        if Class1 is not None:
-            ##### Stratified Sampling per Class
-                        ###  Class 1
-            X_train, y_train, X_test, y_test = U.stratifiedSplit_WithRandomBalanceUndersampling(Class1,'Labels')
-                # Create balanced Dataset and Save it
-            trainSetClass1 = U.addSubstringToName(Class1,'_balanceTrain')
-            class1_X_Train = X_train
-            class1_X_Train['Labels'] = y_train
-            class1_X_Train.to_csv(trainSetClass1)
-            class1_Full_Training = pd.concat([class1_Full_Training,class1_X_Train], ignore_index=True)
-
-            ValSetClass1 = U.addSubstringToName(Class1,'_balanceValid')
-            class1_X_Val = X_test
-            class1_X_Val['Labels'] = y_test
-            class1_X_Val.to_csv(ValSetClass1)
-            class1_Full_Validation = pd.concat([class1_Full_Validation,class1_X_Val], ignore_index=True)
-            Class1 = None
-        
-        if Class5 is not None:   
-            ###  Class 5
-            X_train, y_train, X_test, y_test = U.stratifiedSplit_WithRandomBalanceUndersampling(Class5,'Labels')
-                # Create balanced Dataset and Save it
-            trainSetClass5 = U.addSubstringToName(Class5,'_balanceTrain')
-            class5_X_Train = X_train
-            class5_X_Train['Labels'] = y_train
-            class5_X_Train.to_csv(trainSetClass5)
-            class5_Full_Training = pd.concat([class5_Full_Training,class5_X_Train], ignore_index=True)
-
-            ValSetClass5 = U.addSubstringToName(Class5,'_balanceValid')
-            class5_X_Val = X_test
-            class5_X_Val['Labels'] = y_test
-            class5_X_Val.to_csv(ValSetClass5)
-            class5_Full_Validation = pd.concat([class5_Full_Validation,class5_X_Val], ignore_index=True)
-            Class5 = None
-
-
-    C1_Full_Train = os.path.join(wDri,'class1_Full_Training.csv')
-    class1_Full_Training.to_csv(C1_Full_Train,index=None)
-
-    C1_Full_Validation = os.path.join(wDri,'class1_Full_Validation.csv')
-    class1_Full_Validation.to_csv(C1_Full_Validation,index=None)
-    
-    C2_Full_Train = os.path.join(wDri,'class5_Full_Training.csv')
-    class5_Full_Training.to_csv(C2_Full_Train,index=None)
-
-    C5_Full_Validation = os.path.join(wDri,'class5_Full_Validation.csv')
-    class5_Full_Validation.to_csv(C5_Full_Validation,index=None)
-
-    return True
+    pass
 
     
 def runFunctionInLoop(csvList, function = customFunction):
@@ -109,14 +45,15 @@ def main(cfg: DictConfig):
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
     
-    # subString = '_RelElev.csv'
-    # wdr = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI'
-    # listToCSV = U.listALLFilesInDirBySubstring_fullPath(wdr,subString)
-    csvToSave = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AllDataset_RelElev.csv'
+    # subString = 'cdem'
+    # wdr = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\SR_CDEM'
+    # listToCSV = U.listALLFilesInDirBySubstring_fullPath(wdr,substring=subString)
+    # print(len(listToCSV))
+    # csvToSave = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\cdem_16m_List.csv'
     # U.createCSVFromList(csvToSave,listToCSV)
-    listToCSV = U.createListFromCSV(csvToSave)
-    U.buildBalanceStratifiedDatasetByClasses(listToCSV) 
-
+    raster = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\SR_CDEM\cdem_8m_clip_0_ON-2016_COCHRANE-1m-dsm_0.25_512_0.tif'
+    Datum = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\Analyses1\DATUM\HT2_1997_EPSG3979.tif'
+    U.DatumCorrection(raster,Datum)
 
 
 if __name__ == "__main__":
