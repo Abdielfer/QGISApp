@@ -1,5 +1,6 @@
 # import dc_extract
 import os
+import shutil
 import hydra 
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
@@ -20,20 +21,21 @@ def logger(cfg: DictConfig, nameByTime):
     # logging.info(f"dc_description inputs: {cfg.dc_Extract_params.dc_describeCollections}")
     # logging.info(f"dc_extract inputs: {cfg.dc_Extract_params.dc_extrac_cog}")
        
-def customFunction(DatasetList):
-
+def customFunction(path):
+    Datum = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\Analyses1\DATUM\CGG2013an83_CAN.tif'
+    pathOutput = U.addSubstringToName(path,'_Ellip')
+    U.DatumCorrection_DifferentResolution(path,Datum,pathOutput)
     pass
 
-    
 def runFunctionInLoop(csvList, function = customFunction):
     '''
     Given a list <csvList>, excecute the <function> in loop, with one element from the csv as argument, at the time.  
     '''
-    listOfPath = U.createListFromCSV_multiplePathPerRow(csvList)
+    listOfPath = U.createListFromCSV(csvList)
     for path in listOfPath:
         print(path)
-        function(path) 
-   
+        function(path)
+
 def intFucntion(x):
     return int(x)    
 
@@ -44,16 +46,10 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-    
-    # subString = 'cdem'
-    # wdr = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\SR_CDEM'
-    # listToCSV = U.listALLFilesInDirBySubstring_fullPath(wdr,substring=subString)
-    # print(len(listToCSV))
-    # csvToSave = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\cdem_16m_List.csv'
-    # U.createCSVFromList(csvToSave,listToCSV)
-    raster = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\SR_CDEM\cdem_8m_clip_0_ON-2016_COCHRANE-1m-dsm_0.25_512_0.tif'
-    Datum = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\Analyses1\DATUM\HT2_1997_EPSG3979.tif'
-    U.DatumCorrection(raster,Datum)
+   
+    csv = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\hrdtm_List.csv'
+    runFunctionInLoop(csv)
+
 
 
 if __name__ == "__main__":
@@ -130,3 +126,11 @@ if __name__ == "__main__":
     #     outDataFrame = U.reorder_dataframe_columns(dataFrameWithRelElev,new_order)
     #     print(outDataFrame.columns)
     #     outDataFrame.to_csv(outputDatasetPath,index=None)
+
+    ####   Standardize Dataset columns from reference dataset mean and std by columns.
+    # source = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling\class1_Full.csv'
+    # objective = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling\class1_Full_Validation.csv'
+    # colNames = ['RelElev','GMorph','FloodOrd','Slope','d8fllowAcc','HAND','proximity']
+    # newDataset = U.standardizeDatasetByColName(source,objective,colNames)
+    # output = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling\class1_Full_Standardized_Validation.csv'
+    # newDataset.to_csv(output, index=None)

@@ -8,7 +8,7 @@ from typing import Tuple, List
 import pandas as pd
 import numpy as np
 from numpy import linspace
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import torch
 import rasterio as rio
 from rasterio.plot import show_hist
@@ -31,6 +31,7 @@ import multiprocessing
 import concurrent.futures
 
 import pcraster as pcr
+from pcraster import *
 
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
@@ -485,7 +486,7 @@ def extractFloodClassForMLP(csvPath):
     
     return dfOutputC1,dfOutputC5
 
-def buildBalanceStratifiedDatasetByClasses(DatasetList):
+def buildBalanceStratifiedDatasetByClasses1And5(DatasetList):
     '''
     Crete stratified and balanced dataset from a series of datasets. The inputs are datasets with classes 1 and/or 5. 
     @Create:
@@ -610,9 +611,10 @@ def removeCoordinatesFromDataSet(dataSet):
       print("DataSet has no coordinates to remove")
     return DSNoCoord
 
-def transformDatasets(cfg):
+def customTransformToDatasets(cfg):
     '''
-    This fucntion takes a list of dataset as *csv paths and apply a transformation in loop. You can custom your transformation to cover your needs. 
+    This fucntion takes a list of dataset as *csv paths and apply a transformation in loop. 
+    You can custom your transformation to cover your needs. 
     @cfg:DictConfig: The input must be a Hydra configuration lile, containing the key = datasetsList to a csv with the addres of all *.cvs file to process.  
     '''
     DatasetsPath = cfg.datasetsList
@@ -633,7 +635,51 @@ def DFOperation_removeNegative(DF:pd.DataFrame,colName):
     DF = DF[DF.colName>=0]
     return DF
 
+### Dataset Pretreatment
+def computeStandardizer_fromDataSetCol(dataSetPath, colName):
+    '''
+    Perform satandardizartion on a column of a DataFrame
+    '''
+    dataSet = pd.read_csv(dataSetPath, index_col=None)
+    min = dataSet[colName].min()
+    max = dataSet[colName].max()
+    mean = dataSet[colName].mean()
+    std = dataSet[colName].std()
+    return mean,std,min,max
 
+def standardizeDatasetByColName(datasetSource, datasetPath, colNamesList):
+    '''
+    Standardize a list of columns in a dataset in <datasetPath>, from the values obtained from the <datasetSource>. Both Datasets MUST have the same col_name. 
+    (ex. to perform standardization in validation set from the values in the training set.)
+    @datasetSource: path to the main dataset from which extract mean and std at each col from <colNamesList>
+    @datasetPath: path to the dataset to be standar
+    @colNamesList: 
+    '''
+    dataSet = pd.read_csv(datasetPath, index_col=None)
+    outputDataset = dataSet.copy()
+    for col in colNamesList:
+        mean,std,_,_ = computeStandardizer_fromDataSetCol(datasetSource, col)
+        column_estandar = (dataSet[col] - mean) / std
+        outputDataset[col] = column_estandar
+    return outputDataset
+
+def normalizeDatasetByColName(datasetSource, datasetPath, colNamesList):
+    '''
+    Standardize a list of columns in a dataset in <datasetPath>, from the values obtained from the <datasetSource>. Both Datasets MUST have the same col_name. 
+    (ex. to perform standardization in validation set from the values in the training set.)
+    @datasetSource: path to the main dataset from which extract mean and std at each col from <colNamesList>
+    @datasetPath: path to the dataset to be standar
+    @colNamesList: 
+    '''
+    dataSet = pd.read_csv(datasetPath, index_col=None)
+    outputDataset = dataSet.copy()
+    for col in colNamesList:
+        _,_,min,max = computeStandardizer_fromDataSetCol(datasetSource, col)
+        Delta = max-min
+        column_estandar = (dataSet[col] - min) / Delta
+        outputDataset[col] = column_estandar
+    return outputDataset
+    
 ###################            
 ### General GIS ###
 ###################
@@ -1592,6 +1638,58 @@ def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
     print(f"Successfully clipped at : {outPath}")
     return outPath
 
+def crop_raster_By_BBox(bbox, input_raster, output_raster):
+    """
+    Crop a raster file with GDAL using geographic coordinates
+    Parameters:
+    bbox (list): A list of geographic coordinates in the format [min_x, min_y, max_x, max_y].
+    input_raster (str): The path to the raster file to be cropped.
+    output_raster (str): The path where the cropped raster file will be saved.
+
+    Returns:
+    str: The path to the cropped raster file.
+    """
+    # Open the raster file
+    ds = gdal.Open(input_raster)
+
+    # Get the GeoTransform vector
+    geo_transform = ds.GetGeoTransform()
+    print(f"Geotranform : {geo_transform}")
+    '''
+    [1174144.0, -544240.0, 1178240.0, -548336.0]
+    Geotranform : (-3744151.7943856996, 1787.2306980435524, 0.0, 4067293.019270206, 0.0, -1787.2306980435524)
+    '''
+    # Compute the indices corresponding to the bounding box
+    x_min = (bbox[0] - geo_transform[0]) / geo_transform[1]
+    y_min = (bbox[1] - geo_transform[3]) / geo_transform[5]
+    x_max = (bbox[2] - geo_transform[0]) / geo_transform[1]
+    y_max = (bbox[3] - geo_transform[3]) / geo_transform[5]
+
+    print(x_min, y_min, x_max, y_max)
+
+    # Check the signs of the geotransformation
+    # if geo_transform[1] < 0:
+    #     transit = x_max
+    #     x_max = x_min 
+    #     x_min = transit
+    # if geo_transform[5] < 0:
+    #     transit = y_max
+    #     y_max = y_min 
+    #     y_min  = transit
+
+    # Check if the computed source window is valid
+    if x_min < 0 or y_min < 0 or x_max > ds.RasterXSize or y_max > ds.RasterYSize:
+        print("It Crash...")
+        raise ValueError('The computed source window is not within the extent of the raster.')
+    else:
+        print("Pass the test for ->", x_min, y_min, x_max, y_max )
+    # Use gdal.Translate to crop the raster
+    gdal.Translate(output_raster, ds, projWin=[x_min, y_min, x_max, y_max])
+
+    # Close the datasets
+    ds = None
+    return output_raster
+
 def crop_raster_with_rasterMask(raster_path, mask_raster_path, output_path):
     '''
     ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
@@ -1888,7 +1986,7 @@ def fullSamplingTwoRasterForComparison(raster1_path, raster2_path) -> np.array:
 
     print(f'One sample: {sampled_points[2:]}')
     return sampled_points
-    
+
 def randomSamplingTwoRaster(raster1_path, raster2_path, num_samples) -> np.array:
     '''
     This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value rather one, Z_value rather two]. 
@@ -2177,8 +2275,10 @@ def rasterBinaryUnion(raster1Path, raster2Path, rasterUnion,burnValue:int=1):
     
     return rasterUnion
 
-def DatumCorrection(raster,Datum):
+def DatumCorrection_SameResolution(raster,Datum,outPath = None):
     '''
+    NOTE: This algorithm do not verify the correspondance in goetransformations and CRS between raster and Datum. Ensure so coherence!!!
+    
     Add a verticatl correction to a DEM/DTM tile by a corresponding Datum. 
     - Extract input raster BBox. 
     - Extract the Datum subset and storage it in a temporary file.
@@ -2189,19 +2289,108 @@ def DatumCorrection(raster,Datum):
     ## Extract the Datum subset and storage it in a temporary file.
     DatumTile = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\DatumTemporaryTile.tif'
     crop_raster_with_rasterMask(Datum,raster,DatumTile)
-    # DatumTile_16m = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\DatumTemporaryTile_16m.tif'
-    # resampleRaster(DatumTile,DatumTile_16m,outRes=16)
     # # Proced to correction (Tile + Datum) Raster opperatin &  Save corrected tile with prefix "_ellip" (From ellipsoidal)
-    # corectedTileName = addSubstringToName(raster,'_Ellip')
-    # raster_sum(raster,DatumTile_16m,corectedTileName)
+    if outPath is None:
+        corectedTileName = addSubstringToName(raster,'_Ellip16M')
+    else:
+        corectedTileName = outPath
+    raster_sum(raster,DatumTile,corectedTileName)
     # # Remove temporary Datum tile. 
-    # removeFile([DatumTile])
-    # return corectedTileName
+    removeFile(DatumTile)
+    return corectedTileName
 
+def DatumCorrection_DifferentResolution(raster1_path, Datum_path, output_path) -> np.array:
+    '''
+    This code takes two input rasters and returns an array with of the same shape and resolution of <raster1_path>. 
+    The first input raster is used as a reference. 
+    The two rasters are assumed to be in the same CRS but not necessarily with the same resolution. 
+    The algorithm samples the centre of all pixels using the upper-left corner of the first raster as a reference.
+   
+    RASTER Transformation content 
+    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
+    0. x-coordinate of the upper-left corner of the raster
+    1. width of a pixel in the x-direction
+    2. rotation, which is zero for north-up images
+    3. y-coordinate of the upper-left corner of the raster
+    4. rotation, which is zero for north-up images
+    5. height of a pixel in the y-direction (usually negative)
+
+    The geotransform to convert between pixel coordinates and georeferenced coordinates using the following equations:
+
+    x_geo = geotransform[0] + x_pixel * geotransform[1] + y_line * geotransform[2]
+    y_geo = geotransform[3] + x_pixel * geotransform[4] + y_line * geotransform[5]
+
+    `x_pixel` and `y_line` : pixel coordinates of a point in the raster, 
+    `x_geo` and `y_geo` : corresponding georeferenced coordinates.
+
+    In addition, to extract the value in the centre of the pixels, we add 1/2 of width and height respectively.
+    x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+    y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
+
+    '''
+    # Open the first raster and get its metadata
+    raster1 = gdal.Open(raster1_path)
+    raster1_transform = raster1.GetGeoTransform()
+    raster1_proj = raster1.GetProjection()
+
+    # print(f"raster1_transform : {raster1_transform}")
+    raster1_band = raster1.GetRasterBand(1)
+    arrayRaster1 = raster1.ReadAsArray()
+
+     # Get the size and origin from raster 1
+    x_size = raster1.RasterXSize
+    y_size = raster1.RasterYSize
+    # xOrigin = raster1_transform[0]
+    # yOrigin = raster1_transform[3]
+
+    # Create output array to store the answer. THe aoutput array has same size as raster1.
+    outArray = np.zeros((x_size,y_size))
+
+    # Open the second raster and get its metadata
+    datum = gdal.Open(Datum_path)
+    datum_Geotransform = datum.GetGeoTransform()
+
+    # Create inverted GeoTransformation from Datum to retraive coordinates. 
+    inv_geo_transform_Datum = gdal.InvGeoTransform(datum_Geotransform)
+    datum_band = datum.GetRasterBand(1)
+    
+    # Loop through each pixel in the first raster to 
+    for i in range(x_size):
+        for j in range(y_size):
+            # Get the coordinates of the pixel from the first raster
+            x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+            y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2 
+            # Get the index in Datum at coordinates x,y. 
+            col, row = map(int, gdal.ApplyGeoTransform(inv_geo_transform_Datum, x_coord, y_coord))
+            # print(col, row)
+            # Get the value of the pixel in the Datum and stored it in the outRaster
+            outArray[i,j] = datum_band.ReadAsArray(col, row,1,1)[0]
+            # print(value)
+
+    ## Add Datum(raster2) to raster1
+    outArray += arrayRaster1
+
+    # Create the output raster file
+    driver = gdal.GetDriverByName('GTiff')
+    output_raster = driver.Create(output_path, x_size, y_size, 1, gdal.GDT_Float32)
+
+    # Set the geotransform and projection on the output raster
+    output_raster.SetGeoTransform(raster1_transform)
+    output_raster.SetProjection(raster1_proj)
+
+    # Write the result array to the output raster
+    output_band = output_raster.GetRasterBand(1)
+    output_band.WriteArray(outArray)
+
+    # Close the raster files
+    raster1 = None
+    datum = None
+    output_raster = None
+    return output_path
     
 def raster_sum(raster1_path, raster2_path, output_path):
     '''
-    This functionm sum two rasters. The output takes the information from the first raster.
+    This functionm sum two rasters. The two reaster MUST be same SIZE and RESOLUTION. The output takes the information from the first raster.
     @raster1_path, @raster2_path: Path to the imput rasters.  
     @output_path: Path to the output rasters.
     '''
