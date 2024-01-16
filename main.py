@@ -7,6 +7,8 @@ from omegaconf import DictConfig, OmegaConf
 import util as U
 import logging 
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 # from wbw_test import checkIn as chIn   ### IMPORTANT ###: DO NOT USE. If two instance of the license are created, it can kill my license. Thank you!!
 KMP_DUPLICATE_LIB_OK=True
@@ -21,23 +23,41 @@ def logger(cfg: DictConfig, nameByTime):
     # logging.info(f"dc_description inputs: {cfg.dc_Extract_params.dc_describeCollections}")
     # logging.info(f"dc_extract inputs: {cfg.dc_Extract_params.dc_extrac_cog}")
        
-def customFunction(path):
-    Datum = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\Analyses1\DATUM\CGG2013an83_CAN.tif'
-    pathOutput = U.addSubstringToName(path,'_Ellip')
-    U.DatumCorrection_DifferentResolution(path,Datum,pathOutput)
-    pass
+def customFunction(pathList):
+    U.removeFile(pathList)
+    
 
 def runFunctionInLoop(csvList, function = customFunction):
     '''
     Given a list <csvList>, excecute the <function> in loop, with one element from the csv as argument, at the time.  
     '''
-    listOfPath = U.createListFromCSV(csvList)
-    for path in listOfPath:
-        print(path)
-        function(path)
+    listOfPath = U.createListFromCSV_multiplePathPerRow(csvList)
+    for l in listOfPath:
+        print('-------------')
+        print(l[1],'\n', l[0],'\n',l[2])
+        csvListPath = l[1]
+        print(type(csvListPath))
+        df = pd.read_csv(csvListPath, index_col= None, header=None)
+        bandList = []
+        for i in range(0,df.shape[0]):
+            bandList.append(df.iloc[i][0])
+        
+        function(bandList,l[0],l[2])
 
+       
+    
 def intFucntion(x):
     return int(x)    
+
+def compare_bboxes(bbox1, bbox2):
+    # Unpack the bounding boxes
+    xmin1, ymin1, xmax1, ymax1 = bbox1
+    xmin2, ymin2, xmax2, ymax2 = bbox2
+    # Compare the bounding boxes
+    if xmin1 == xmin2 and ymin1 == ymin2 and xmax1 == xmax2 and ymax1 == ymax2:
+        return True
+    else:
+        return False
 
 @hydra.main(version_base=None, config_path=f"config", config_name="mainConfigPC")
 def main(cfg: DictConfig):
@@ -46,12 +66,25 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-   
-    csv = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\hrdtm_List.csv'
-    runFunctionInLoop(csv)
+    
+    ##   __________________________
+    source = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling_RasterizeCombined\class1_Full.csv'
+    objective = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\RegionalModelingApplication\QC_Plessisville_FullBasin_Cilp_RegionalModelApply.csv'
+    colNames = ['RelElev','GMorph','FloodOrd','Slope','d8fllowAcc','HAND','proximity']
+    newDataset = U.normalizeDatasetByColName(source,objective,colNames)
+    output = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\RegionalModelingApplication\QC_Plessisville_FullBasin_RMA_Scaled_Class_1.csv'
+    print(newDataset.describe())
+    newDataset.to_csv(output, index=None)
 
 
-
+    # fig, ax = plt.subplots(1,sharey=True, tight_layout=True)
+    # # x=np.array((data_DEM1[0],data_DEM2[0]))
+    # ax.scatter(data, error)
+    # ax.set_title('hrdsm vs sr_cdsm') 
+    # fig.tight_layout()
+    # plt.show()
+    
+ 
 if __name__ == "__main__":
     with U.timeit():
         main()  
@@ -81,7 +114,7 @@ if __name__ == "__main__":
     # newParams = {'normalizers': '[100,22,53]'}
     # U.overWriteHydraConfig(configFile,newParams)
 
-    ### Regional statictics with polygons
+    ### Regional statistics with polygons
     # tif = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_cdem_fill_hillslope.tif'
     # watersheds = r'c:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_watershed.shp'
     # U.raster_max_by_polygons(tif,watersheds)
@@ -121,16 +154,65 @@ if __name__ == "__main__":
     #     outputDatasetPath = U.addSubstringToName(csvPath,'_RelElev')
     #     dem = pathList[1]
     #     dataFrameWithRelElev = U.addCollFromRasterToDataFrame(dataset,dem)
-    #     new_order = ['x_coord', 'y_coord', 'Cilp', 'RelElev','GMorph', 'FloodOrd',
+    #     new_order = ['x_coord', 'y_coord', 'RelElev','GMorph', 'FloodOrd',
     #     'Slope', 'd8fllowAcc', 'HAND', 'proximity', 'Labels']
     #     outDataFrame = U.reorder_dataframe_columns(dataFrameWithRelElev,new_order)
     #     print(outDataFrame.columns)
     #     outDataFrame.to_csv(outputDatasetPath,index=None)
 
-    ####   Standardize Dataset columns from reference dataset mean and std by columns.
+    #### Build balanced and Stratified Dataset by classes.
+    # csv = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\Dataset_LabelsMode_List.csv'
+    # wdir = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling_RasterizedMode'
+    # datasetList = U.createListFromCSV(csv)
+    # U.buildBalanceStratifiedDatasetByClasses1And5(datasetList,wdir,targetCol='LabelsMode')
+
+
+     ##### Concat Datasets
+    # class1_Trin = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling_RasterizedMode\class5_Full_Training.csv'
+    # class1_Val = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling_RasterizedMode\class5_Full_Validation.csv'
+    # class1Full = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling_RasterizedMode\class5_Full_RaterizedMode.csv'
+    # class1TrainDF = pd.read_csv(class1_Trin,index_col=False)
+    # class1ValDF = pd.read_csv(class1_Val,index_col=False)
+    # full = pd.concat([class1TrainDF,class1ValDF])
+    # full.to_csv(class1Full,index=None)
+
+    ####   Min-Max normalization by dataset columns from reference dataset mean, std, min, max.
     # source = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling\class1_Full.csv'
     # objective = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling\class1_Full_Validation.csv'
     # colNames = ['RelElev','GMorph','FloodOrd','Slope','d8fllowAcc','HAND','proximity']
-    # newDataset = U.standardizeDatasetByColName(source,objective,colNames)
+    # newDataset = U.normalizeDatasetByColName(source,objective,colNames)
     # output = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling\class1_Full_Standardized_Validation.csv'
     # newDataset.to_csv(output, index=None)
+        
+
+    ##### Create Dataset of error from a set of pairs of tiles. 
+    # hrTiles_csv =  r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\hrdsm_16m.csv'
+    # hrTiles_csv_list = U.createListFromCSV(hrTiles_csv)
+    # cdem_csv = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\sr_cdsm.csv'
+    # cdem_csv_list = U.createListFromCSV(cdem_csv)
+    # datsetOutName = r'C:\Users\abfernan\CrossCanFloodMapping\SResDEM\Data\ExploringError_CDSM_HRDEM\SourceErrorStudy\error_hrdsm_srcdsm_16m.csv'
+    
+    # col_names = ['x_coord', 'y_coord', 'hrdsm', 'cdsm', 'error']
+    # arrayDataSet = np.zeros((1,5))
+    # for hr in hrTiles_csv_list:
+    #     _,HResName,_ = U.get_parenPath_name_ext(hr)
+    #     for lowRes in cdem_csv_list:
+    #         _,lowResName,_ = U.get_parenPath_name_ext(lowRes)
+    #         if HResName in lowResName:
+    #             print('Sampling ->> ',HResName)
+    #             samples = U.twoRaster_ErrorAnalyse(hr,lowRes,10000)
+    #             arrayDataSet = np.concatenate([arrayDataSet,samples])
+    #             cdem_csv_list.remove(lowRes)
+   
+    # dataSet = pd.DataFrame(arrayDataSet,columns=col_names)
+    # print(dataSet.describe())
+    # dataSet.to_csv(datsetOutName,index=None)
+        
+    #### Sampling full raster to DataSet
+    # raster = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\AL_Lethbridge_ok\AL_Lethbridge_FullBasin_Cilp_FullDataset_AOI.tif'
+    # array = U.sampling_Full_raster_GDAL(raster)
+    # dataSet = pd.DataFrame(array)
+    # print(dataSet.head())
+    # print(dataSet.describe())
+    # datsetOutName = r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\dc_output\testingFullSampling.csv'
+    # dataSet.to_csv(datsetOutName,index=None)  

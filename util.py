@@ -21,6 +21,7 @@ from osgeo import gdal_array
 from osgeo.gdalconst import *
 import geopandas as gpd
 gdal.UseExceptions()
+from scipy.interpolate import griddata
  
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import confusion_matrix
@@ -242,7 +243,8 @@ def createListFromCSV(csv_file_location: os.path, delim:str =',')->list:
     @return: list from a <csv_file_location>.
     Argument:
     @csv_file_location: full path file location and name.
-    '''       
+    '''      
+    print('Csv Location : ->>', csv_file_location) 
     df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
     out = []
     for i in range(0,df.shape[0]):
@@ -475,28 +477,27 @@ def extractFloodClassForMLP(csvPath):
     if 1 in uniqueClasses:
         class1_Col = [1 if i!= 0 else 0 for i in labels]
         df[labelsName] = class1_Col
-        dfOutputC1 = addSubstringToName(csvPath,'_RawClass1')
+        dfOutputC1 = addSubstringToName(csvPath,'_Class1')
         df.to_csv(dfOutputC1,index=None)
 
     if 5 in uniqueClasses:
         class5_Col = [1 if i == 5 else 0 for i in labels]
         df[labelsName] = class5_Col
-        dfOutputC5 = addSubstringToName(csvPath,'_RawClass5')
+        dfOutputC5 = addSubstringToName(csvPath,'_Class5')
         df.to_csv(dfOutputC5,index=None)
     
     return dfOutputC1,dfOutputC5
 
-def buildBalanceStratifiedDatasetByClasses1And5(DatasetList):
+def buildBalanceStratifiedDatasetByClasses1And5(DatasetList,wDri,targetCol):
     '''
     Crete stratified and balanced dataset from a series of datasets. The inputs are datasets with classes 1 and/or 5. 
     @Create:
-        - A balanced Dataset by individual input, at the same address than the input dataset. 
+        - A balanced Dataset by individual class in the labels col, at the same address than the input dataset. 
         - Datasets of training and validation for each class, with a concatenation of the corresponding indivudual datasets. Saved at <wDir> folder. NOTE: Ensure wDir exist.  
     
     @Return: True if everything is OK. Otherwise, a fucntion error. 
     '''
-    wDri = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling'
-    
+        
     ####   Empty Dataset creation 
     class1_Full_Training = pd.DataFrame()
     class1_Full_Validation = pd.DataFrame()
@@ -515,7 +516,7 @@ def buildBalanceStratifiedDatasetByClasses1And5(DatasetList):
         if Class1 is not None:
             ##### Stratified Sampling per Class
                         ###  Class 1
-            X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class1,'Labels')
+            X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class1,targetColName=targetCol)
                 # Create balanced Dataset and Save it
             trainSetClass1 = addSubstringToName(Class1,'_balanceTrain')
             class1_X_Train = X_train
@@ -534,7 +535,7 @@ def buildBalanceStratifiedDatasetByClasses1And5(DatasetList):
     
         if Class5 is not None:   
             ###  Class 5
-            X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class5,'Labels')
+            X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class5,targetColName=targetCol)
                 # Create balanced Dataset and Save it
             trainSetClass5 = addSubstringToName(Class5,'_balanceTrain')
             class5_X_Train = X_train
@@ -829,7 +830,7 @@ def fromDEMtoDataFrame(DEM:os.path,labels:os.path,target:str='percentage',mask:o
     # addTargetColsToDatasetCSV(scv_output,labels,target=target)
     return scv_output
 
-def buildShapefilePointFromCsvDataframe(csvDataframe:os.path, outShepfile:os.path='', EPGS:int=4326):
+def buildShapefilePointFromCsvDataframe(csvDataframe:os.path, outShepfile:os.path='', EPGS:int=3979):
     '''
     Creates a shapefile of points from a Dataframe <df>. The DataFrame is expected to have a HEADER, and the two first colums with the x_coordinates and y_coordinates respactivelly.
     @csvDatafame:os.path: Path to the *csv containing the Dataframe with the list of points to add to the Shapefile. 
@@ -932,8 +933,8 @@ def createRaster(savePath:os.path, data:np.array, profile, noData:int = None):
 
 def stackBandsInMultibandRaster(input_paths, output_path):
     '''
-    Given a series of raster in the <input_path>, the algorithm create a multiband raster to the <output_path>.
-    @input_path: List of path to a single band rasters.
+    Given a list of raster path in the <input_path>, the algorithm create a multiband raster to the <output_path>. 
+    @input_path: List of paths to the single band rasters.
     @output_path: Output path to save the multiband raster. 
     '''
     src_files_to_mosaic = []
@@ -1096,13 +1097,40 @@ def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 1400
                     print(f'{sampleCont-1} found') 
     return arrayDataset
 
+def fullSamplingMultiBandRaster_Rio(rasterIn)-> np.array:
+    '''
+    Given a multiband raster, the algorith, return an np.array of all point in the raster and it coordinates, organized as follow:
+    [x_coord,y_coord, band_1[x_coord,y_coord], ..., band_n[x_coord,y_coord]]. The NoData values are asigned with "0".
+    @rasterIn: the path to the input raster.
+    @return: np.array with the sampled points.
+    '''
+    sampleCont =0    
+    arrayDataset = []
+    with rio.open(rasterIn) as src:
+        # Read data from bands into an array
+        data = src.read()
+        NoData = src.profile['nodata']
+        W,H = src.width,src.height
+        arrayDataset = np.zeros((int(W*H),(src.count+2)))
+
+        for i in range(0,H):
+            for j in range(0,W):
+                ## extract corrdinates at index (i,j)
+                xy = np.array(src.xy(i,j))
+                ## Extract banda values as vector
+                bandsArray = data[:, i, j]
+                # Check if neither value is NoData OR NaN in the first band (DEM)
+                if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN and bandsArray[0] >= 0):
+                    # Add the sample to the dataset
+                    arrayDataset[sampleCont] = np.concatenate((xy, bandsArray))
+                    sampleCont+=1
+    return arrayDataset
+
 def transformShp_Value(shpFile, targetField, baseField, funct:None):
     '''
-    Apply the trasnformation <fucnt> to the field <targetField>, passing as fucntion input th value in <baseField>
-
+    Apply the trasnformation <fucnt> to the field <targetField>, passing as fucntion input the value in <baseField>.
     '''
-
-# Open the shapefile
+    # Open the shapefile
     driver = ogr.GetDriverByName('ESRI Shapefile')
     shapefile = driver.Open(shpFile, 1)  # 1 means open in update mode
     # Get the layer
@@ -1120,6 +1148,7 @@ def transformShp_Value(shpFile, targetField, baseField, funct:None):
 
     # Close the shapefile
     shapefile = None
+
 
 ###########################
 ####   PCRaster Tools  ####
@@ -1917,6 +1946,76 @@ def getNeighborsGDAL(raster_file, shape_file):
 
     return output_array
 
+def sampling_Full_raster_GDAL(raster_path) -> np.array:
+    '''
+    This code takes one input rasters and returns an array with three columns: [x_coordinate, y_coordinate, Z_value]. 
+    The algorithm samples the centre of all pixels using the upper-left corner of the raster as a reference.
+    When you read a raster with GDAL, the raster transformation is represented by a <geotransform>. The geotransform is a six-element tuple that describes the relationship between pixel coordinates and georeferenced coordinates. The elements of the geotransform are as follows:
+    
+    RASTER Transformation content 
+    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
+    0. x-coordinate of the upper-left corner of the raster
+    1. width of a pixel in the x-direction
+    2. rotation, which is zero for north-up images
+    3. y-coordinate of the upper-left corner of the raster
+    4. rotation, which is zero for north-up images
+    5. height of a pixel in the y-direction (usually negative)
+
+    The geotransform to convert between pixel coordinates and georeferenced coordinates using the following equations:
+
+    x_geo = geotransform[0] + x_pixel * geotransform[1] + y_line * geotransform[2]
+    y_geo = geotransform[3] + x_pixel * geotransform[4] + y_line * geotransform[5]
+
+    `x_pixel` and `y_line` : pixel coordinates of a point in the raster, 
+    `x_geo` and `y_geo` : corresponding georeferenced coordinates.
+
+    In addition, to extract the value in the centre of the pixels, we add 1/2 of width and height respectively.
+    x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+    y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
+
+    '''
+    # Open the first raster and get its metadata
+    raster = gdal.Open(raster_path)
+    raster1_transform = raster.GetGeoTransform()
+    print(f"raster1_transform : {raster1_transform}")
+    numberOfBands = raster.RasterCount
+    raster_noDataValue = []
+    for b in range(1, numberOfBands+1):
+        band = raster.GetRasterBand(b)
+        raster_noDataValue.append(band.GetNoDataValue())
+
+    # Get the size of the rasters
+    x_size = raster.RasterXSize
+    y_size = raster.RasterYSize
+    print(f"raster size : {x_size} x {y_size}")
+    # Create an array to store the sampled points
+    sampled_points = np.zeros((x_size * y_size, 2+numberOfBands))
+
+    print(f" Iterations {x_size * y_size * numberOfBands}")
+    # Loop through each pixel in the first raster
+    for i in range(x_size):
+        x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+        for j in range(y_size):
+            # Get the coordinates of the pixel in the first raster
+            y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2 
+            band_values = []
+            # Loop through each band
+            for n in range(1, numberOfBands+1):
+                band = raster.GetRasterBand(n)
+                # Read the pixel value
+                value = band.ReadAsArray(i, j, 1, 1)[0][0]
+                # Append the value to the list
+                # Add the sampled point to the array
+                if (value not in raster_noDataValue and value != np.NaN and value>=0):
+                    band_values.append(value)
+                else:
+                    band_values.append(0)
+            
+            data = np.concatenate([[x_coord,y_coord], band_values])
+            sampled_points[i * y_size + j] = data
+    arrayClean = sampled_points[~np.all(sampled_points[:,2:]==0, axis=1)]
+    return arrayClean
+
 def fullSamplingTwoRasterForComparison(raster1_path, raster2_path) -> np.array:
     '''
     This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value  raster one, Z_value raster two]. 
@@ -2060,6 +2159,76 @@ def randomSamplingTwoRaster(raster1_path, raster2_path, num_samples) -> np.array
 
     return samples
 
+def twoRaster_ErrorAnalyse(raster1_path, raster2_path, num_samples) -> np.array:
+    '''
+    This code takes two input rasters and returns an array with four columns: [x_coordinate, y_coordinate, Z_value rather one, Z_value rather two]. 
+    The first input raster is used as a reference. 
+    The two rasters are assumed to be in the same CRS but not necessarily with the same resolution. 
+    The algorithm samples the centre of all pixels using the upper-left corner of the first raster as a reference.
+    When you read a raster with GDAL, the raster transformation is represented by a <geotransform>. The geotransform is a six-element tuple that describes the relationship between pixel coordinates and georeferenced coordinates ⁴. The elements of the geotransform are as follows:
+    
+    RASTER Transformation content 
+    ex. raster_transformation : (1242784.0, 8.0, 0.0, -497480.0, 0.0, -8.0)
+    0. x-coordinate of the upper-left corner of the raster
+    1. width of a pixel in the x-direction
+    2. rotation, which is zero for north-up images
+    3. y-coordinate of the upper-left corner of the raster
+    4. rotation, which is zero for north-up images
+    5. height of a pixel in the y-direction (usually negative)
+
+    The geotransform to convert between pixel coordinates and georeferenced coordinates using the following equations:
+
+    x_geo = geotransform[0] + x_pixel * geotransform[1] + y_line * geotransform[2]
+    y_geo = geotransform[3] + x_pixel * geotransform[4] + y_line * geotransform[5]
+
+    `x_pixel` and `y_line` : pixel coordinates of a point in the raster, 
+    `x_geo` and `y_geo` : corresponding georeferenced coordinates.
+
+    In addition, to extract the value in the centre of the pixels, we add 1/2 of width and height respectively.
+    x_coord = i * raster1_transform[1] + raster1_transform[0] + raster1_transform[1]/2 
+    y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
+
+    '''    
+    # Get the shape of the rasters
+    # Open the first raster and get its metadata
+    raster1 = gdal.Open(raster1_path)
+    raster1_transform = raster1.GetGeoTransform()
+    # print(f"raster1_transform : {raster1_transform}")
+    raster1_band = raster1.GetRasterBand(1)
+    raster1_noDataValue = raster1_band.GetNoDataValue()
+
+    # Open the second raster and get its metadata
+    raster2 = gdal.Open(raster2_path)
+    raster2_transform = raster2.GetGeoTransform()
+    raster2_band = raster2.GetRasterBand(1)
+    raster2_noDataValue = raster2_band.GetNoDataValue()
+
+    # Get the size of the rasters
+    x_size = raster1.RasterXSize
+    y_size = raster1.RasterYSize
+
+    # Create an empty array to store the samples
+    samples = np.zeros((num_samples,5))
+    # Loop through the number of samples
+    sampleCont = 0
+    while sampleCont<num_samples:
+        i = np.random.randint(0, x_size)
+        j = np.random.randint(0, y_size)
+        # Generate random coordinates within the raster limits
+        x = i * raster1_transform[1] + raster1_transform[0]+ raster1_transform[1]/2 
+        y = j * raster1_transform[5] + raster1_transform[3]+ raster1_transform[5]/2 
+        
+        # Extract the values from the two rasters at the selected coordinates
+        value1 = raster1_band.ReadAsArray(i, j, 1, 1)[0][0]
+        value2 = raster2_band.ReadAsArray(i, j, 1, 1)[0][0]
+
+        # Check if neither value is : NoData OR NaN
+        if (value1!= raster1_noDataValue and value1 != np.NaN and value2 != raster2_noDataValue and value2 != np.NaN):
+            # Add the values to the samples array
+            samples[sampleCont] = [x, y, value1, value2, value1-value2]
+            sampleCont+=1    
+    return samples
+
 def getFieldValueFromPolygonByCoordinates(vector_path:os.path, field_name:str, x:float, y:float)->list:
     # Open the vector file
     vector = ogr.Open(vector_path)
@@ -2125,6 +2294,72 @@ def is_point_in_bbox(bbox, point):
     else:
         return False
 
+def rasterizePointsVector(vectorInput, rasterOutput, atribute:str='fid',pixel_size:int = 1)->bool:
+    # Open the data source
+    ds = ogr.Open(vectorInput)
+    lyr = ds.GetLayer()
+    # Set up the new raster
+    # this should be set appropriately
+    x_min, x_max, y_min, y_max = lyr.GetExtent()
+    cols = int((x_max - x_min) / pixel_size)
+    rows = int((y_max - y_min) / pixel_size)
+    raster_ds = gdal.GetDriverByName('GTiff').Create(rasterOutput, cols, rows, 1, gdal.GDT_Byte)
+    raster_ds.SetGeoTransform((x_min, pixel_size, 0, y_max, 0, -pixel_size))
+    band = raster_ds.GetRasterBand(1)
+    band.SetNoDataValue(0)
+
+    # Rasterize
+    gdal.RasterizeLayer(raster_ds, [1], lyr, options=[f"ATTRIBUTE={atribute}",'COMPRESS=LZW','TILED=YES','BIGTIFF=YES'])
+
+    # Close datasets
+    band = None
+    raster_ds = None
+    ds = None
+    return True
+
+def rasterizePointsVector_Interpolation(vector_fn, raster_fn, atribute:str='fid', pixel_size:int = 1):
+    '''
+    Creates a raster where each pixel value is an interpolation of the point values, using inverse distance weighting.
+      The point values are taken from the VALUE attribute of the points. 
+      Replace the  <atribute> with the actual attribute name in your vector file.
+    @vector_fn: input vector path.
+    @raster_fn: output raster path.
+    @atribute: str (default ='fid'). Attribute to be mapped from the point vector. 
+    @pixel_size: Output pixel size.  
+    '''
+
+    # Open the data source
+    ds = ogr.Open(vector_fn)
+    lyr = ds.GetLayer()
+
+    # Set up the new raster
+    x_min, x_max, y_min, y_max = lyr.GetExtent()
+    cols = int((x_max - x_min) / pixel_size)
+    rows = int((y_max - y_min) / pixel_size)
+    raster_ds = gdal.GetDriverByName('GTiff').Create(raster_fn, cols, rows, 1,gdal.GDT_Float32, options=['COMPRESS=LZW', 'TILED=YES','BIGTIFF=YES'])
+    raster_ds.SetGeoTransform((x_min, pixel_size, 0, y_max, 0, -pixel_size))
+    band = raster_ds.GetRasterBand(1)
+    band.SetNoDataValue(-9999)
+
+    # Create an array for storing point values
+    values = np.full((rows, cols), -9999, dtype=float)
+    band.WriteArray(values)
+
+    # Loop through each point in the layer
+    for feat in lyr:
+        geom = feat.GetGeometryRef()
+        x = geom.GetX()
+        y = geom.GetY()
+        value = feat.GetField(atribute)  # replace "VALUE" with the name of your attribute
+        i = int((x - x_min) / pixel_size)
+        j = int((y_max - y) / pixel_size)
+        band.WriteArray(value,i,j)
+    # Close datasets
+    band = None
+    raster_ds = None
+    ds = None
+    return 
+
 def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='fib', outResol:int=16, burnValue:int=1):
     '''
     inVector:os.path ,outRaster:os.path,attribute:str='fid', outResol:int=16
@@ -2140,7 +2375,7 @@ def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='
         out = outRaster
     else:
         parent,name,_ = get_parenPath_name_ext(inVector)
-        out = os.path.join(parent,name+'.tif')
+        out = os.path.join(parent,name+'_ModeSampli.tif')
    
     # Open the data source
     driver = ogr.GetDriverByName('ESRI Shapefile')
@@ -2171,18 +2406,18 @@ def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='
     #### Resample again to the output resolution by tree steps. A quartier of the full resolution, 
     output_raster_quartier = addSubstringToName(baseRaster,'_quartier')
     resampleRaster(baseRaster,output_raster_quartier,outRes=outResol//4,srs=output_srs,algo=6)
-   
+ 
     raster_half = addSubstringToName(baseRaster,'_half')
     resampleRaster(output_raster_quartier,raster_half,outRes=outResol//2,srs=output_srs,algo=6)
-   
-    raster_NN = addSubstringToName(baseRaster,'_NN')
-    resampleRaster(raster_half,raster_NN,outRes=outResol,srs=output_srs,algo=0)
+
+    # raster_NN = addSubstringToName(baseRaster,'_NN')
+    # resampleRaster(raster_half,raster_NN,outRes=outResol,srs=output_srs,algo=0)
 
     raster_Mode = addSubstringToName(baseRaster,'_Mode')
-    resampleRaster(raster_half,raster_Mode,outRes=outResol,srs=output_srs,algo=6)
-    
+    resampleRaster(raster_half,out,outRes=outResol,srs=output_srs,algo=6)
+   
     # #### Perform Union
-    rasterBinaryUnion(raster_Mode,raster_NN,out,burnValue=burnValue)
+    # rasterBinaryUnion(raster_Mode,raster_NN,out,burnValue=burnValue)
     
     ### Remove Temporary Files
     # clearTransitFolderContent(parentPath)
@@ -2425,6 +2660,42 @@ def raster_sum(raster1_path, raster2_path, output_path):
     raster1 = None
     raster2 = None
     output_raster = None
+
+def interpolate_raster(input_raster_fn, output_raster_fn, nodata_value=-9999):
+    # Open the input raster file
+    input_ds = gdal.Open(input_raster_fn)
+    input_band = input_ds.GetRasterBand(1)
+
+    # Read the raster data and replace NoData values with numpy.nan
+    data = input_band.ReadAsArray()
+    data = np.where(data == nodata_value, np.nan, data)
+
+    # Get the coordinates of the known points
+    x = np.arange(data.shape[1])
+    y = np.arange(data.shape[0])
+    points = np.array(np.meshgrid(x, y)).reshape(2, -1).T.astype(np.float16)
+
+    # Get the values of the known points
+    values = data[~np.isnan(data)].astype(np.float16)
+
+    # Perform the bilinear interpolation
+    grid_x, grid_y = np.mgrid[0:data.shape[0], 0:data.shape[1]]
+    grid_z = griddata(points, values, (grid_x, grid_y), method='linear')
+
+    # Create the output raster file
+    driver = gdal.GetDriverByName('GTiff')
+    output_ds = driver.Create(output_raster_fn, data.shape[1], data.shape[0], 1, gdal.GDT_CInt16, options=['COMPRESS=LZW', 'TILED=YES','BIGTIFF=YES'])
+    output_ds.SetGeoTransform(input_ds.GetGeoTransform())
+    output_ds.SetProjection(input_ds.GetProjection())
+    output_band = output_ds.GetRasterBand(1)
+    output_band.WriteArray(grid_z)
+    output_band.SetNoDataValue(nodata_value)
+
+    # Close datasets
+    input_band = None
+    input_ds = None
+    output_band = None
+    output_ds = None
 
 ############################
 #### Datacube_ Extract  ####
@@ -3479,6 +3750,33 @@ def from_TifList_toDataFrame(bandsList:list,labels:os.path=None,mask:os.path=Non
     ## Build a dataframe with the samples
     df = pd.DataFrame(samplesArr,columns=colList)
     df = addCollFromRasterToDataFrame(df,labels,'Labels')
+    scv_output = replaceExtention(rasterMultiband,'.csv')
+    print(df.head())
+    df.to_csv(scv_output,index=None)
+    # buildShapefilePointFromCsvDataframe(scv_output,EPGS=3979)
+    return scv_output
+
+
+def from_TifList_toDataFrame_ForRegModelingApplication(bandsList:list,mask:os.path=None, rasterMultiband:os.path=None)->os.path:
+    '''
+    Sampling automatically a DEM of multiples bands to produce a DataSet. The dataset contains points where at list one band have a non-zero value.  
+    '''
+    ## Create the list of names for the dataFrame by extracting the band's names from the list of full path. Additionally, create column names for coordinates.
+    colList = extractNamesListFromFullPathList(bandsList,['x_coord','y_coord'])
+    
+    ## Build a multiband raster to ensure spatial correlation between features at sampling time.
+    stackBandsInMultibandRaster(bandsList,rasterMultiband)
+    ## Crop the multiband raster if needed.
+    if mask:
+        cropped = addSubstringToName(rasterMultiband,'_AOI')
+        raster = clipRasterByMask(rasterMultiband,mask,cropped)
+        replace_no_data_value(raster)
+    else:
+        raster = rasterMultiband
+    ## Random sampling the raster with a density defined by the ratio. This is the more expensive opperation..by patient. 
+    samplesArr = sampling_Full_raster_GDAL(raster)
+    ## Build a dataframe with the samples
+    df = pd.DataFrame(samplesArr,columns=colList)
     scv_output = replaceExtention(rasterMultiband,'.csv')
     print(df.head())
     df.to_csv(scv_output,index=None)
