@@ -32,22 +32,10 @@ def runFunctionInLoop(csvList, function = customFunction):
     Given a list <csvList>, excecute the <function> in loop, with one element from the csv as argument, at the time.  
     '''
     listOfPath = U.createListFromCSV_multiplePathPerRow(csvList)
-    for l in listOfPath:
-        print('-------------')
-        print(l[1],'\n', l[0],'\n',l[2])
-        csvListPath = l[1]
-        print(type(csvListPath))
-        df = pd.read_csv(csvListPath, index_col= None, header=None)
-        bandList = []
-        for i in range(0,df.shape[0]):
-            bandList.append(df.iloc[i][0])
+   
         
-        function(bandList,l[0],l[2])
-
-       
-    
 def intFucntion(x):
-    return int(x)    
+    return int(x)
 
 def compare_bboxes(bbox1, bbox2):
     # Unpack the bounding boxes
@@ -66,25 +54,15 @@ def main(cfg: DictConfig):
     # logger(cfg,nameByTime)
     # U.dc_extraction(cfg)
     # U.multiple_dc_extract_ByPolygonList(cfg)
-    
-    ##   __________________________
-    source = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\StratifiedSampling_RasterizeCombined\class1_Full.csv'
-    objective = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\RegionalModelingApplication\QC_Plessisville_FullBasin_Cilp_RegionalModelApply.csv'
-    colNames = ['RelElev','GMorph','FloodOrd','Slope','d8fllowAcc','HAND','proximity']
-    newDataset = U.normalizeDatasetByColName(source,objective,colNames)
-    output = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\RegionalModelingApplication\QC_Plessisville_FullBasin_RMA_Scaled_Class_1.csv'
-    print(newDataset.describe())
-    newDataset.to_csv(output, index=None)
+    vectorInput = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\RegionalModelingApplication\BestModelsApplication\ValidationDataset_RastMode_Normalized_class1_RMA_2401241404.shp'
 
+    # rasterOutput = r'C:\Users\abfernan\CrossCanFloodMapping\FloodMappingProjData\HRDTMByAOI\A_DatasetsForMLP\RegionalModelingApplication\RMA_outputs\ValidationSet_RastComb_Normalized_class1_RMA_2401181901.tif'
+    rasterOutput = U.replaceExtention(vectorInput, '.tif')
 
-    # fig, ax = plt.subplots(1,sharey=True, tight_layout=True)
-    # # x=np.array((data_DEM1[0],data_DEM2[0]))
-    # ax.scatter(data, error)
-    # ax.set_title('hrdsm vs sr_cdsm') 
-    # fig.tight_layout()
-    # plt.show()
-    
- 
+    U.rasterizePointsVector(vectorInput,rasterOutput,atribute='y_hat',pixel_size=16)
+    U.reproject_tif(rasterOutput)
+
+      
 if __name__ == "__main__":
     with U.timeit():
         main()  

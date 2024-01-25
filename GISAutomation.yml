@@ -17,8 +17,6 @@ dependencies:
   - imbalanced-learn
   - scikit-learn
   - pandas
-  # - whitebox_tools
+  - whitebox_tools
   - qgis
-  - PCRaster
   - pyyaml
-  - imbalanced-learn

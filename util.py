@@ -490,7 +490,7 @@ def extractFloodClassForMLP(csvPath):
 
 def buildBalanceStratifiedDatasetByClasses1And5(DatasetList,wDri,targetCol):
     '''
-    Crete stratified and balanced dataset from a series of datasets. The inputs are datasets with classes 1 and/or 5. 
+    Crete stratified and balanced dataset from a series of input datasets. The inputs are datasets with classes 1 and/or 5. 
     @Create:
         - A balanced Dataset by individual class in the labels col, at the same address than the input dataset. 
         - Datasets of training and validation for each class, with a concatenation of the corresponding indivudual datasets. Saved at <wDir> folder. NOTE: Ensure wDir exist.  
@@ -943,6 +943,7 @@ def stackBandsInMultibandRaster(input_paths, output_path):
     for path in input_paths:
         # print(f'band {i} : {path}')
         i+=1
+        print("Path Enter to Rio--->>", path)
         src = rio.open(path)
         src_files_to_mosaic.append(src)
 
@@ -1626,8 +1627,9 @@ def reproject_tif(tif_file, output_crs:str='EPSG:3979') -> str:
     dataset = gdal.Open(tif_file,gdal.GA_Update)
     # Create a spatial reference object for the output CRS
     output_srs = osr.SpatialReference()
-    output_srs.ImportFromEPSG(int(output_crs.split(':')[1]))
-    output_file_path = os.path.join(parent,inputNeme + '_' + ext)
+    epsg_int = int(output_crs.split(':')[1])
+    output_srs.ImportFromEPSG(epsg_int)
+    output_file_path = os.path.join(parent,inputNeme + '_' + str(epsg_int) + ext)
     # Create the output dataset
     '''
     Do not define input dataset crs. 
@@ -3755,7 +3757,6 @@ def from_TifList_toDataFrame(bandsList:list,labels:os.path=None,mask:os.path=Non
     df.to_csv(scv_output,index=None)
     # buildShapefilePointFromCsvDataframe(scv_output,EPGS=3979)
     return scv_output
-
 
 def from_TifList_toDataFrame_ForRegModelingApplication(bandsList:list,mask:os.path=None, rasterMultiband:os.path=None)->os.path:
     '''
