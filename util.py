@@ -14,7 +14,8 @@ import rasterio as rio
 from rasterio.plot import show_hist
 # from rasterio.enums import Resampling
 from datetime import datetime
-from whitebox_tools import WhiteboxTools, default_callback
+from whitebox import WhiteboxTools
+from whitebox_tools import default_callback
 from torchgeo.datasets.utils import download_url
 from osgeo import gdal,ogr, osr
 from osgeo import gdal_array
@@ -96,7 +97,7 @@ def makeFileCopy(inputFilePath, outputFilePath):
     except PermissionError:
         print("Permission denied.")
     except:
-        print("Error occurred while copying file.")
+        print(f"Error occurred while copying file -> {inputFilePath}")
 
 def removeFile(filePath):
     try:
@@ -134,12 +135,15 @@ def extractNamesListFromFullPathList(pathlist, initialValues:list=[])-> list:
     '''
     From the list of path extract the names, then split by underscore 
     character and returns a list of the last substring from each element in the input.
+    @pathlist: list of path to be readed. 
+    @initialValues:list=[]: Values to be added at the begining of the output list
     '''
     if initialValues:
         listOfNames = initialValues
     else:
         listOfNames =[]
     for path in pathlist:
+        # print(f"path in extract names {path}")
         _,tifName,_ = get_parenPath_name_ext(path)
         listOfNames.append(tifName.split("_")[-1])
     return listOfNames
@@ -226,7 +230,7 @@ def listALLFilesInDirBySubstring_fullPath(cwd, substring = '.csv')->list:
         fullList.extend(localList) 
         return fullList
 
-def createListFromCSV_multiplePathPerRow(csv_file_location: os.path, delim:str =',')-> list[list]:  
+def createListFromCSV_multiplePathPerRow(csv_file_location: os.path, delim:str =';')-> list[list]:  
     '''
     @return: list from a <csv_file_location>.
     Argument:
@@ -244,7 +248,7 @@ def createListFromCSV(csv_file_location: os.path, delim:str =',')->list:
     Argument:
     @csv_file_location: full path file location and name.
     '''      
-    print('Csv Location : ->>', csv_file_location) 
+    print('List created from csv : ->>', csv_file_location) 
     df = pd.read_csv(csv_file_location, index_col= None, header=None, delimiter=delim)
     out = []
     for i in range(0,df.shape[0]):
@@ -370,8 +374,12 @@ def overWriteHydraConfig(hydraYML, newParams) -> bool:
     except Exception as e:
         print(f"An error occurred: {e}")
         return False
-    
     return True
+
+def updateHydraDicConfig(cfg:DictConfig, args:iter):
+    for key, value in args.items():
+        cfg[key] = value
+    return cfg
 
 def updateDict(dic:dict, args:dict)->dict:
     outDic = dic
@@ -409,7 +417,7 @@ def isCoordPairInArray(arr, pair) ->bool:
     out = np.any(arr[np.where(arr[:,0]==x),1] == y)
     return out
 
-def reorder_dataframe_columns(df, new_order)->pd.DataFrame:
+def reorder_dataframe_columns(df:pd.DataFrame, new_order:list)->pd.DataFrame:
     """
     Reorder the columns of a DataFrame.
     Parameters:
@@ -431,7 +439,6 @@ def reorder_list(lst, new_order):
     list: A list with reordered elements
     """
     return [lst[i] for i in new_order]
-
 
 ############################            
 ### Dataset Manipulation ###
@@ -458,14 +465,14 @@ def randomUndersampling(x_DataSet, y_DataSet, sampling_strategy = 'auto'):
     print('Resampled dataset shape %s' % Counter(y_res))
     return x_res, y_res
 
-def extractFloodClassForMLP(csvPath):
+def extractFloodClassForMLP(csvPath,prefix:str=''):
     '''
     THis function asume the last colum of the dataset are the lables
     
     The goal is to create separated Datasets with classes 1 and 5 from the input csv. 
     The considered rule is: 
         Class_5: all class 5.
-        Class_1: All classes, since they are inclusive. All class 5 are also class 5. 
+        Class_1: All classes, since they are inclusive. All class 1 are also class 5. 
     '''
     dfOutputC1= None
     dfOutputC5 = None
@@ -477,18 +484,18 @@ def extractFloodClassForMLP(csvPath):
     if 1 in uniqueClasses:
         class1_Col = [1 if i!= 0 else 0 for i in labels]
         df[labelsName] = class1_Col
-        dfOutputC1 = addSubstringToName(csvPath,'_Class1')
+        dfOutputC1 = addSubstringToName(csvPath,prefix+'_Class1')
         df.to_csv(dfOutputC1,index=None)
 
     if 5 in uniqueClasses:
         class5_Col = [1 if i == 5 else 0 for i in labels]
         df[labelsName] = class5_Col
-        dfOutputC5 = addSubstringToName(csvPath,'_Class5')
+        dfOutputC5 = addSubstringToName(csvPath,prefix+'_Class5')
         df.to_csv(dfOutputC5,index=None)
     
     return dfOutputC1,dfOutputC5
 
-def buildBalanceStratifiedDatasetByClasses1And5(DatasetList,wDri,targetCol):
+def buildBalanceStratifiedDatasetByClasses1And5(DatasetList,wDri,targetCol,saveIndividuals:bool=False,prefix:str=''):
     '''
     Crete stratified and balanced dataset from a series of input datasets. The inputs are datasets with classes 1 and/or 5. 
     @Create:
@@ -512,62 +519,203 @@ def buildBalanceStratifiedDatasetByClasses1And5(DatasetList,wDri,targetCol):
         print('_____________________New Dataset __________________')
         print(f"---- {csvPath}")
         ### Split in Class1 And Class5 and Save It.
-        Class1,Class5 = extractFloodClassForMLP(csvPath)
+        Class1,Class5 = extractFloodClassForMLP(csvPath,prefix=prefix)
         if Class1 is not None:
             ##### Stratified Sampling per Class
                         ###  Class 1
             X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class1,targetColName=targetCol)
                 # Create balanced Dataset and Save it
-            trainSetClass1 = addSubstringToName(Class1,'_balanceTrain')
             class1_X_Train = X_train
             class1_X_Train['Labels'] = y_train
             class1_X_Train['Aoi_Id'] = Aoi_ID
-            class1_X_Train.to_csv(trainSetClass1,index = None)
-            class1_Full_Training = pd.concat([class1_Full_Training,class1_X_Train], ignore_index=True)
+            class1_Full_Training = pd.concat([class1_Full_Training,class1_X_Train], ignore_index=True)           
+            if saveIndividuals:
+                trainSetClass1 = addSubstringToName(Class1,'_balanceTrain')
+                class1_X_Train.to_csv(trainSetClass1,index = None)
             
-            ValSetClass1 = addSubstringToName(Class1,'_balanceValid')
             class1_X_Val = X_test
             class1_X_Val['Labels'] = y_test
             class1_X_Val['Aoi_Id'] = Aoi_ID
-            class1_X_Val.to_csv(ValSetClass1,index = None)
             class1_Full_Validation = pd.concat([class1_Full_Validation,class1_X_Val], ignore_index=True)
+            if saveIndividuals:
+                ValSetClass1 = addSubstringToName(Class1,'_balanceValid')
+                class1_X_Val.to_csv(ValSetClass1,index = None)
             Class1 = None
-    
+        
         if Class5 is not None:   
             ###  Class 5
             X_train, y_train, X_test, y_test = stratifiedSplit_WithRandomBalanceUndersampling(Class5,targetColName=targetCol)
                 # Create balanced Dataset and Save it
-            trainSetClass5 = addSubstringToName(Class5,'_balanceTrain')
             class5_X_Train = X_train
             class5_X_Train['Labels'] = y_train
             class5_X_Train['Aoi_Id'] = Aoi_ID
-            class5_X_Train.to_csv(trainSetClass5,index = None)
             class5_Full_Training = pd.concat([class5_Full_Training,class5_X_Train], ignore_index=True)
-
-            ValSetClass5 = addSubstringToName(Class5,'_balanceValid')
+            if saveIndividuals:
+                trainSetClass5 = addSubstringToName(Class5,'_balanceTrain')
+                class5_X_Train.to_csv(trainSetClass5,index = None)
+            
             class5_X_Val = X_test
             class5_X_Val['Labels'] = y_test
             class5_X_Val['Aoi_Id'] = Aoi_ID
-            class5_X_Val.to_csv(ValSetClass5,index = None)
             class5_Full_Validation = pd.concat([class5_Full_Validation,class5_X_Val], ignore_index=True)
+            if saveIndividuals:
+                ValSetClass5 = addSubstringToName(Class5,'_balanceValid')
+                class5_X_Val.to_csv(ValSetClass5,index = None)
+            
             Class5 = None
         Aoi_ID+=1
 
-    C1_Full_Train = os.path.join(wDri,'class1_Full_Training.csv')
+    C1_Full_Train = os.path.join(wDri,prefix+'class1_Full_Training.csv')
     class1_Full_Training.to_csv(C1_Full_Train,index=None)
 
-    C1_Full_Validation = os.path.join(wDri,'class1_Full_Validation.csv')
+    C1_Full_Validation = os.path.join(wDri,prefix+'class1_Full_Validation.csv')
     class1_Full_Validation.to_csv(C1_Full_Validation,index=None)
     
-    C2_Full_Train = os.path.join(wDri,'class5_Full_Training.csv')
+    C2_Full_Train = os.path.join(wDri,prefix+'class5_Full_Training.csv')
     class5_Full_Training.to_csv(C2_Full_Train,index=None)
 
-    C5_Full_Validation = os.path.join(wDri,'class5_Full_Validation.csv')
+    C5_Full_Validation = os.path.join(wDri,prefix+'class5_Full_Validation.csv')
     class5_Full_Validation.to_csv(C5_Full_Validation,index=None)
 
-    C5_Full_Validation = os.path.join(wDri,'Aoi_ID_Name_List.csv')
+    C5_Full_Validation = os.path.join(wDri,prefix+'Aoi_ID_Name_List.csv')
     createCSVFromList(C5_Full_Validation,aoi_nameIDList)
+    
     return True
+
+def createFullBalanceStratifiedDatasetsByClasses1And5(DatasetList,wDri,targetCol,saveIndividuals:bool=False,prefix:str=''):
+    '''
+    Crete stratified and balanced dataset from a series of input datasets. The inputs are datasets with classes 1 and/or 5. The outputs are datasets, combinig the undersamplet subset of each input dataset. Optionally, the subset can be saved by setting <saveIndividuals = True>. 
+    
+    @DatasetList: A list of <path> to the datasets to be undersampled and concatenated.
+    @wDri: The dir to save the full datasets. 
+    @targetCol: The labels column name. 
+    @saveIndividuals:bool(Default = False): Optionally, save the undersampled portion of each individual dataset provided in the <DatasetList>.
+    @prefix:str='': Prefix to add to each output for identification. 
+    @Return: True if everything is OK. Otherwise, a fucntion error. 
+    '''
+        
+    ####   Empty Dataset creation 
+    class1_FullDataset = pd.DataFrame()
+    class5_FullDataset = pd.DataFrame()
+    print(len(DatasetList))
+    Aoi_ID = 1
+    aoi_nameIDList = []
+    for csvPath in DatasetList:
+        _,Name,_ = get_parenPath_name_ext(csvPath)
+        aoi_nameIDList.append(str(f"{Aoi_ID} - {Name}"))
+        print('_____________________Reading Dataset: __________________')
+        print(f"---- {csvPath}")
+        ### Split in Class1 And Class5 and Save It.
+        class1_Subset,class5_Subset = extractFloodClassForMLP(csvPath,prefix=prefix)
+        if class1_Subset is not None:
+            ##### Stratified Sampling per Class
+                        ###  Class 1
+            DS_X, DS_Y = importDataSet(class1_Subset, targetCol)
+            X, Y = randomUndersampling(DS_X, DS_Y)
+                # Create balanced Dataset and Save it
+            class1 = X
+            class1['Labels'] = Y
+            class1['Aoi_Id'] = Aoi_ID
+            class1_FullDataset = pd.concat([class1_FullDataset,class1], ignore_index=True)           
+            if saveIndividuals:
+                StratifUndersamp_Class1 = addSubstringToName(class1_Subset,'_StratifUndersamp')
+                class1.to_csv(StratifUndersamp_Class1,index = None)
+            class1_Subset = None
+        
+        if class5_Subset is not None:
+            ##### Stratified Sampling per Class
+                        ###  Class 1
+            DS_X, DS_Y = importDataSet(class5_Subset, targetCol)
+            X, Y = randomUndersampling(DS_X, DS_Y)
+                # Create balanced Dataset and Save it
+            class5 = X
+            class5['Labels'] = Y
+            class5['Aoi_Id'] = Aoi_ID
+            class5_FullDataset = pd.concat([class5_FullDataset,class5], ignore_index=True)           
+            if saveIndividuals:
+                StratifUndersamp_Class5 = addSubstringToName(class5_Subset,'_StratifUndersamp')
+                class5.to_csv(StratifUndersamp_Class5,index = None)
+            class5_Subset = None
+        Aoi_ID+=1
+    ### Print output dataset summaries:
+    print(" -----------------   Class 1 -----------------------")
+    print(f"C1_FullDataset summary:")
+    print(class1_FullDataset.describe())
+    print('C1_FullDatase labels count %s' % Counter(class1_FullDataset[targetCol]))
+
+
+    print(" -----------------   Class 5 -----------------------")
+    print(f"C5_FullDataset summary:")
+    print(class5_FullDataset.describe())
+    print('C5_FullDatase labels count %s' % Counter(class5_FullDataset[targetCol]))
+
+    ### Saves outputs datasets.
+    C1_FullDataset_path = os.path.join(wDri,prefix+'class1_FullDatasetStratUndersam.csv')
+    class1_FullDataset.to_csv(C1_FullDataset_path,index=None)
+
+    C5_FullDataset_path = os.path.join(wDri,prefix+'class5_FullDatasetStratUndersam.csv')
+    class5_FullDataset.to_csv(C5_FullDataset_path,index=None)
+   
+    ID_Name_List_path = os.path.join(wDri,prefix+'Aoi_ID_Name_List.csv')
+    createCSVFromList(ID_Name_List_path,aoi_nameIDList)
+    return True
+
+def createBalanceStratifiedDatasets_SingleClass(DatasetListPath:os.path,wDri,targetCol, classValue:int=1,saveIndividuals:bool=False,prefix:str='')->os.path:
+    '''
+    Crete stratified and balanced dataset from a series of input datasets. The inputs are datasets with classes 1 and/or 5. The outputs are datasets, combinig the undersamplet subset of each input dataset. Optionally, the subset can be saved by setting <saveIndividuals = True>. 
+    
+    @DatasetList:os.path: *csv with the list of <path> to the datasets to be undersampled and concatenated.
+    @wDri: The dir to save the full datasets. 
+    @targetCol: The labels column name. 
+    @classValue:int(default = 1): The value of the class to be extracted as positive classs from the dataframe. The positive class qill be represented as <1>, all other values will be represented as <0>.
+    @saveIndividuals:bool(Default = False): Optionally, save the undersampled portion of each individual dataset provided in the <DatasetList>.
+    @prefix:str='': Prefix to add to each output for identification. 
+    @Return: True if everything is OK. Otherwise, a fucntion error. 
+    '''
+    DatasetList = createListFromCSV(DatasetListPath,delim=';')    
+    ####   Empty Dataset creation 
+    fullDataset = pd.DataFrame()
+    print(len(DatasetList))
+    Aoi_ID = 1
+    aoi_nameIDList = []
+    for csvPath in DatasetList:
+        _,Name,_ = get_parenPath_name_ext(csvPath)
+        aoi_nameIDList.append(str(f"{Aoi_ID} - {Name}"))
+        print('_____________________Reading Dataset: __________________')
+        print(f"---- {csvPath}")
+        ### Split in Class=0 And Class=1 and Save It.
+        DS_X, DS_Y = importDataSet(csvPath, targetCol)
+            # Create balanced Dataset and Save it
+        X, Y = randomUndersampling(DS_X, DS_Y)
+            ## Create binary column from <targetCol>
+        binaryColumn = [1 if i== classValue else 0 for i in Y]
+        Y = binaryColumn
+        outDataset = X
+        outDataset['Labels'] = Y
+        outDataset['Aoi_Id'] = Aoi_ID
+        fullDataset = pd.concat([fullDataset,outDataset], ignore_index=True)           
+        if saveIndividuals:
+            StratifUndersamp = addSubstringToName(csvPath,'_StratifUndersamp')
+            outDataset.to_csv(StratifUndersamp,index = None)
+        csvPath = None
+        Aoi_ID+=1
+    
+    ### Print output dataset summaries:
+    print(" ----------------------------------------")
+    print(f"FullDataset summary:")
+    print(fullDataset.describe())
+    print('FullDatase labels count %s' % Counter(fullDataset[targetCol]))
+
+    ### Saves outputs datasets.
+    newName = addSubstringToName(DatasetListPath,'_StratUndersamp')
+    fullDataset_path = os.path.join(wDri,newName)
+    fullDataset.to_csv(fullDataset_path,index=None)
+
+    ID_NameLiat_newName = addSubstringToName(DatasetListPath,'_Aoi_ID_Name_List')
+    ID_Name_List = os.path.join(wDri,ID_NameLiat_newName)
+    createCSVFromList(ID_Name_List,aoi_nameIDList)
+    return fullDataset_path
+
 
 def stratifiedSplit(dataSetName, targetColName):
     '''
@@ -614,7 +762,7 @@ def removeCoordinatesFromDataSet(dataSet):
 
 def customTransformToDatasets(cfg):
     '''
-    This fucntion takes a list of dataset as *csv paths and apply a transformation in loop. 
+    This fucntion takes a list of datasets as *csv paths and apply a transformation in loop. 
     You can custom your transformation to cover your needs. 
     @cfg:DictConfig: The input must be a Hydra configuration lile, containing the key = datasetsList to a csv with the addres of all *.cvs file to process.  
     '''
@@ -628,7 +776,7 @@ def customTransformToDatasets(cfg):
         x_dsUndSamp.to_csv(NewFile, index=None)
     pass
 
-def DFOperation_removeNegative(DF:pd.DataFrame,colName):
+def DFOperation_removeNegativeByColumn(DF:pd.DataFrame,colName:str)->pd.DataFrame:
     '''
     NOTE: OPPERATIONS ARE MADE IN PLACE!!!
     Remove all row index in the collumn <colName> if the value is negative
@@ -637,7 +785,7 @@ def DFOperation_removeNegative(DF:pd.DataFrame,colName):
     return DF
 
 ### Dataset Pretreatment
-def computeStandardizer_fromDataSetCol(dataSetPath, colName):
+def computeStandardizer_fromDataSetCol(dataSetPath:os.path, colName):
     '''
     Perform satandardizartion on a column of a DataFrame
     '''
@@ -648,7 +796,7 @@ def computeStandardizer_fromDataSetCol(dataSetPath, colName):
     std = dataSet[colName].std()
     return mean,std,min,max
 
-def standardizeDatasetByColName(datasetSource, datasetPath, colNamesList):
+def standardizeDatasetByColName(datasetSource:os.path, datasetObjectivePath, colNamesList)->pd.DataFrame:
     '''
     Standardize a list of columns in a dataset in <datasetPath>, from the values obtained from the <datasetSource>. Both Datasets MUST have the same col_name. 
     (ex. to perform standardization in validation set from the values in the training set.)
@@ -656,7 +804,7 @@ def standardizeDatasetByColName(datasetSource, datasetPath, colNamesList):
     @datasetPath: path to the dataset to be standar
     @colNamesList: 
     '''
-    dataSet = pd.read_csv(datasetPath, index_col=None)
+    dataSet = pd.read_csv(datasetObjectivePath, index_col=None)
     outputDataset = dataSet.copy()
     for col in colNamesList:
         mean,std,_,_ = computeStandardizer_fromDataSetCol(datasetSource, col)
@@ -664,7 +812,7 @@ def standardizeDatasetByColName(datasetSource, datasetPath, colNamesList):
         outputDataset[col] = column_estandar
     return outputDataset
 
-def normalizeDatasetByColName(datasetSource, datasetPath, colNamesList):
+def normalizeDatasetByColName(datasetSource, datasetPath, colNamesList)->pd.DataFrame:
     '''
     Standardize a list of columns in a dataset in <datasetPath>, from the values obtained from the <datasetSource>. Both Datasets MUST have the same col_name. 
     (ex. to perform standardization in validation set from the values in the training set.)
@@ -943,7 +1091,7 @@ def stackBandsInMultibandRaster(input_paths, output_path):
     for path in input_paths:
         # print(f'band {i} : {path}')
         i+=1
-        print("Path Enter to Rio--->>", path)
+        # print("Path Enter to Rio--->>", path)
         src = rio.open(path)
         src_files_to_mosaic.append(src)
 
@@ -1090,7 +1238,7 @@ def randomSamplingMultiBandRaster(rasterIn,ratio:float=1, maxSampling:int = 1400
             ## Extract banda values as vector
             bandsArray = data[:, i, j]
             # Check if neither value is NoData OR NaN in the first band (DEM)
-            if (bandsArray[0]!= NoData and bandsArray[0] != np.NAN and bandsArray[0] >= 0) and not isCoordPairInArray(arrayDataset,xy):
+            if (bandsArray[0] > 0) and not isCoordPairInArray(arrayDataset,xy):  #!= NoData and bandsArray[0] != np.NAN and bandsArray[0] >= 0
                 # Add the sample to the dataset
                 arrayDataset[sampleCont] = np.concatenate((xy, bandsArray))
                 sampleCont+=1
@@ -1113,7 +1261,6 @@ def fullSamplingMultiBandRaster_Rio(rasterIn)-> np.array:
         NoData = src.profile['nodata']
         W,H = src.width,src.height
         arrayDataset = np.zeros((int(W*H),(src.count+2)))
-
         for i in range(0,H):
             for j in range(0,W):
                 ## extract corrdinates at index (i,j)
@@ -1658,7 +1805,7 @@ def assigneProjection(raster_file, output_crs:str='EPSG:3979') -> str:
         if 'tif' in ext:
             return reproject_tif(raster_file,output_crs) 
 
-def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> gdal.Dataset:
+def clipRasterByMask(DEMPath:os.path, vectorMask, outPath)-> os.path:
     '''
     Simplified version of crop_tif() WORKS well! However, do not perform extra operations like correct NoData or verify crs.
     If you are sure of your inputs and outputs, use it.
@@ -1838,9 +1985,10 @@ def computeRelativeElevation(dem) -> os.path:
     ## Replace NoData with -9999 in place. Ensure valid operations. 
     dataset = gdal.Open(dem, 0)
     # replace_no_data_value(dem)
-    arrayNoNan = replaceRastNegativesWithNan(dem)
+    arrayNoNan = replaceRastNoDataWithNan(dem)
     dataMin = np.nanmin(arrayNoNan)
-    print(dataMin)
+    print(f"MinElev found {dataMin} in the DEM -> {dem}" )
+    # print(dataMin)
     relativeElevationArray = np.subtract(arrayNoNan,dataMin)
   
     # Create a new raster dataset for the result
@@ -1851,7 +1999,7 @@ def computeRelativeElevation(dem) -> os.path:
     # Write the union array to the new raster dataset
     if len(relativeElevationArray.shape) >2:
         relativeElevationArray = relativeElevationArray[0]
-    print(relativeElevationArray.shape)
+    # print(relativeElevationArray.shape)
     out_raster.GetRasterBand(1).WriteArray(relativeElevationArray)
     out_raster.SetGeoTransform(dataset.GetGeoTransform())
     out_raster.SetProjection(dataset.GetProjection())
@@ -2008,7 +2156,7 @@ def sampling_Full_raster_GDAL(raster_path) -> np.array:
                 value = band.ReadAsArray(i, j, 1, 1)[0][0]
                 # Append the value to the list
                 # Add the sampled point to the array
-                if (value not in raster_noDataValue and value != np.NaN and value>=0):
+                if (value != np.NaN and value>=0):
                     band_values.append(value)
                 else:
                     band_values.append(0)
@@ -2296,7 +2444,7 @@ def is_point_in_bbox(bbox, point):
     else:
         return False
 
-def rasterizePointsVector(vectorInput, rasterOutput, atribute:str='fid',pixel_size:int = 1)->bool:
+def rasterizePointsVector(vectorInput, rasterOutput, atribute:str='fid',pixel_size:int = 1,EPGS:str = 'EPSG:3979')->bool:
     # Open the data source
     ds = ogr.Open(vectorInput)
     lyr = ds.GetLayer()
@@ -2307,6 +2455,7 @@ def rasterizePointsVector(vectorInput, rasterOutput, atribute:str='fid',pixel_si
     rows = int((y_max - y_min) / pixel_size)
     raster_ds = gdal.GetDriverByName('GTiff').Create(rasterOutput, cols, rows, 1, gdal.GDT_Byte)
     raster_ds.SetGeoTransform((x_min, pixel_size, 0, y_max, 0, -pixel_size))
+    raster_ds.SetProjection(EPGS)
     band = raster_ds.GetRasterBand(1)
     band.SetNoDataValue(0)
 
@@ -2319,65 +2468,22 @@ def rasterizePointsVector(vectorInput, rasterOutput, atribute:str='fid',pixel_si
     ds = None
     return True
 
-def rasterizePointsVector_Interpolation(vector_fn, raster_fn, atribute:str='fid', pixel_size:int = 1):
+def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='fid', outResol:int=16, burnValue:int=1)-> os.path:
     '''
-    Creates a raster where each pixel value is an interpolation of the point values, using inverse distance weighting.
-      The point values are taken from the VALUE attribute of the points. 
-      Replace the  <atribute> with the actual attribute name in your vector file.
-    @vector_fn: input vector path.
-    @raster_fn: output raster path.
-    @atribute: str (default ='fid'). Attribute to be mapped from the point vector. 
-    @pixel_size: Output pixel size.  
-    '''
-
-    # Open the data source
-    ds = ogr.Open(vector_fn)
-    lyr = ds.GetLayer()
-
-    # Set up the new raster
-    x_min, x_max, y_min, y_max = lyr.GetExtent()
-    cols = int((x_max - x_min) / pixel_size)
-    rows = int((y_max - y_min) / pixel_size)
-    raster_ds = gdal.GetDriverByName('GTiff').Create(raster_fn, cols, rows, 1,gdal.GDT_Float32, options=['COMPRESS=LZW', 'TILED=YES','BIGTIFF=YES'])
-    raster_ds.SetGeoTransform((x_min, pixel_size, 0, y_max, 0, -pixel_size))
-    band = raster_ds.GetRasterBand(1)
-    band.SetNoDataValue(-9999)
-
-    # Create an array for storing point values
-    values = np.full((rows, cols), -9999, dtype=float)
-    band.WriteArray(values)
-
-    # Loop through each point in the layer
-    for feat in lyr:
-        geom = feat.GetGeometryRef()
-        x = geom.GetX()
-        y = geom.GetY()
-        value = feat.GetField(atribute)  # replace "VALUE" with the name of your attribute
-        i = int((x - x_min) / pixel_size)
-        j = int((y_max - y) / pixel_size)
-        band.WriteArray(value,i,j)
-    # Close datasets
-    band = None
-    raster_ds = None
-    ds = None
-    return 
-
-def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='fib', outResol:int=16, burnValue:int=1):
-    '''
-    inVector:os.path ,outRaster:os.path,attribute:str='fid', outResol:int=16
     Rasterize a polygon stepping in from a high resolution to the desired resolution. This method help with a better raster representation of the vector, by capturing all the information a 1m resolution and then downsamling to the desired resolution. The downsampling is based in two algorithms, Mode and Nearest-Neigbour (NN). Each algorith capture a different level of details. The <Mode> takes into account the max frequence to be represented at lower resolution, while the NN capture local information, sometimes isolated and not considered by the Mode. The result is the UNION of both algorithms at the desired <outResol>.
     @inVector:os.path : Input vector path.
     @outRaster:os.path: Output raster path.(Optional) If None, the output raster will be saved at the shapefile folder, with the shapefile name.
     @attribute:str='fid'. feature identifier. To be replaced with the desired field inthe <inVector>
     @outResol:int=16. Output resolution. (Default=16m)
+    @retrun: output path to the resampled raster.
     '''
-    parentPath = createTransitFolder(r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data',folderName='resampling')
+    parentPath = createTransitFolder(r'C:\Users\abfernan\CrossCanFloodMapping\GitLabRepos\GISAutomation\data',folderName='resampling')
     baseRaster = os.path.join(parentPath,'baseRaster.tif')
     if outRaster:
         out = outRaster
     else:
         parent,name,_ = get_parenPath_name_ext(inVector)
-        out = os.path.join(parent,name+'_ModeSampli.tif')
+        out = os.path.join(parent,name+'_CombinedSampling.tif')
    
     # Open the data source
     driver = ogr.GetDriverByName('ESRI Shapefile')
@@ -2405,25 +2511,77 @@ def rasterizePolygonMultiSteps(inVector,outRaster:os.path = None,attribute:str='
     # Close dataset
     out_raster_ds.FlushCache()
     
-    #### Resample again to the output resolution by tree steps. A quartier of the full resolution, 
+    #### Resample again to the output resolution by tree steps. 
+    # A quartier of the full resolution 
     output_raster_quartier = addSubstringToName(baseRaster,'_quartier')
     resampleRaster(baseRaster,output_raster_quartier,outRes=outResol//4,srs=output_srs,algo=6)
- 
+    # A half of the full resolution 
     raster_half = addSubstringToName(baseRaster,'_half')
     resampleRaster(output_raster_quartier,raster_half,outRes=outResol//2,srs=output_srs,algo=6)
 
-    # raster_NN = addSubstringToName(baseRaster,'_NN')
-    # resampleRaster(raster_half,raster_NN,outRes=outResol,srs=output_srs,algo=0)
+    raster_NN = addSubstringToName(baseRaster,'_NN')
+    resampleRaster(raster_half,raster_NN,outRes=outResol,srs=output_srs,algo=0)
 
     raster_Mode = addSubstringToName(baseRaster,'_Mode')
-    resampleRaster(raster_half,out,outRes=outResol,srs=output_srs,algo=6)
+    resampleRaster(raster_half,raster_Mode,outRes=outResol,srs=output_srs,algo=6)
    
     # #### Perform Union
-    # rasterBinaryUnion(raster_Mode,raster_NN,out,burnValue=burnValue)
+    rasterBinaryUnion(raster_Mode,raster_NN,out,burnValue=burnValue)
     
     ### Remove Temporary Files
     # clearTransitFolderContent(parentPath)
+    return out
 
+def rasterizePolygonTo_1m(inVector,outRaster:os.path = None,attribute:str='fib'):
+    '''
+    NOTE: NOT YET TESTED
+
+
+       Rasterize a polygon stepping in from a high resolution to the desired resolution. This method help with a better raster representation of the vector, by capturing all the information a 1m resolution and then downsamling to the desired resolution. The downsampling is based in two algorithms, Mode and Nearest-Neigbour (NN). Each algorith capture a different level of details. The <Mode> takes into account the max frequence to be represented at lower resolution, while the NN capture local information, sometimes isolated and not considered by the Mode. The result is the UNION of both algorithms at the desired <outResol>.
+    @inVector:os.path : Input vector path.
+    @outRaster:os.path: Output raster path.(Optional) If None, the output raster will be saved at the shapefile folder, with the shapefile name.
+    @attribute:str='fid'. feature identifier. To be replaced with the desired field inthe <inVector>
+    
+    '''
+    parentPath = createTransitFolder(r'C:\Users\abfernan\CrossCanFloodMapping\GISAutomation\data',folderName='resampling')
+    baseRaster = os.path.join(parentPath,'baseRaster.tif')
+    if outRaster:
+        out = outRaster
+    else:
+        parent,name,_ = get_parenPath_name_ext(inVector)
+        out = os.path.join(parent,name+'_1m.tif')
+   
+    # Open the data source
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    ds = driver.Open(inVector, 0)
+    lyr = ds.GetLayer()
+ 
+    # Create the destination data source
+    gtiff_driver = gdal.GetDriverByName('GTiff')
+    x_dimention =  int(lyr.GetExtent()[1] - lyr.GetExtent()[0])
+    y_dimention = int( lyr.GetExtent()[3] - lyr.GetExtent()[2])
+    out_raster_ds = gtiff_driver.Create(baseRaster,x_dimention,y_dimention,1, gdal.GDT_Byte)
+    
+    # Set the geotransform to create a 1m resolutin Raster. This is the best way I found to represent the vector, without affecting the Raster extention at creation. 
+    out_raster_ds.SetGeoTransform((lyr.GetExtent()[0], 1, 0, lyr.GetExtent()[3], 0, -1))
+    # Add a band
+    band = out_raster_ds.GetRasterBand(1)
+    band.SetNoDataValue(-9999)
+    ### extract EPSG
+    EPSG = extractVectorEPSG(inVector)
+    output_srs = osr.SpatialReference()
+    output_srs.ImportFromEPSG(EPSG)
+    
+    #### Rasterize
+    gdal.RasterizeLayer(out_raster_ds,[1],lyr,options=[f"ATTRIBUTE={attribute}"])
+    # Close dataset
+    out_raster_ds.FlushCache()
+    
+    #### Resample again to the output resolution by tree steps. 
+    # A quartier of the full resolution 
+    output_raster_quartier = addSubstringToName(baseRaster,'_quartier')
+    resampleRaster(baseRaster,output_raster_quartier,outRes=1,srs=output_srs,algo=6)
+    
 def raster_to_vector(raster_path, output_vector_path) -> os.path:
     # Open the raster file
     raster = gdal.Open(raster_path, 0)
@@ -2469,7 +2627,7 @@ def resampleRaster(inRaster, outRaster,outRes=None,srs=None,EPSG:int=3979, algo:
         resolution_y = outRes
     else:
         resolution_x = geotransform[1]
-        resolution_y = abs(geotransform[5])
+        resolution_y = np.abs(geotransform[5])
 
     if srs:
         out_dstSRS = srs
@@ -2519,7 +2677,7 @@ def DatumCorrection_SameResolution(raster,Datum,outPath = None):
     Add a verticatl correction to a DEM/DTM tile by a corresponding Datum. 
     - Extract input raster BBox. 
     - Extract the Datum subset and storage it in a temporary file.
-    - Proced to correction (Tile + Datum) Raster opperatin
+    - Proced to correction (Tile + Datum) Raster opperation
     - Save corrected tile with prefix "_ellip" (From ellipsoidal)
     - Remove temporary Datum tile. 
     '''
@@ -2565,7 +2723,7 @@ def DatumCorrection_DifferentResolution(raster1_path, Datum_path, output_path) -
     y_coord = j * raster1_transform[5] + raster1_transform[3] + raster1_transform[5]/2
 
     '''
-    # Open the first raster and get its metadata
+    # Open the first raster and get it metadata
     raster1 = gdal.Open(raster1_path)
     raster1_transform = raster1.GetGeoTransform()
     raster1_proj = raster1.GetProjection()
@@ -2728,9 +2886,9 @@ def dc_extraction(cfg: DictConfig, args:dict=None)-> str:
         dict_DcExtract = updateDict(dict_DcExtract,args)
     # print(f"New dcExtract Dict:  {dict_DcExtract}")
     ##  procede to extraction
-    out = instantiate(dict_DcExtract)
-    print(f'out from dc_extraction {out[0]}')
-    return out[0]
+    instantiate(dict_DcExtract)
+    # print(f'Out from dc_extraction {out[0]}')
+    # return out[0]
 
 def multiple_dc_extract_ByPolygonList(cfg: DictConfig, clipIt:bool=True):
     '''
@@ -2765,11 +2923,16 @@ def multiple_dc_extract_ByPolygonList(cfg: DictConfig, clipIt:bool=True):
 
 ## LocalPaths and global variables: to be adapted to your needs ##
 
+import pkg_resources
 wbt = WhiteboxTools()
 currentDirectory = os.getcwd()
-wbt.set_whitebox_dir(r'C:\Users\abfernan\.conda\envs\PCRaster\Lib\site-packages\whitebox\WBT')
+print(wbt.version())
+
+    # identify the sample data directory of the package
+data_dir = os.path.dirname(pkg_resources.resource_filename("whitebox", 'testdata/'))
+wbt.set_whitebox_dir(r'C:\users\abfernan\appdata\local\anaconda3\envs\gisautom\lib\site-packages\whitebox\WBT')
 wbt.set_working_dir(currentDirectory)
-wbt.set_verbose_mode(False)
+wbt.set_verbose_mode(True)
 wbt.set_compress_rasters(True) # compress the rasters map. Just ones in the code is needed
 
     ## Pretraitment #
@@ -2786,7 +2949,7 @@ class WbT_DEM_FeatureExtraction():
         self.FilledDEM = addSubstringToName(DEM,'_fill')
         wbt.set_working_dir(self.parentDir)
         print(f"Working dir at: {self.parentDir}")    
-        wbt.set_whitebox_dir(r'C:\Users\abfernan\.conda\envs\PCRaster\Lib\site-packages\whitebox\WBT')
+        # wbt.set_whitebox_dir(r'C:\Users\abfernan\.conda\envs\PCRaster\Lib\site-packages\whitebox\WBT')
 
     def computeSlope(self):
         outSlope = addSubstringToName(self.FilledDEM,'_Slope')
@@ -2823,15 +2986,15 @@ class WbT_DEM_FeatureExtraction():
         @OUTPUT: DEM <_fillWL> Corrected DEM with wang_and_liu method. 
         '''
         dtmNoDataValueSetted = addSubstringToName(self.DEMName,'_NoDataOK')
-        wbt.set_nodata_value(
-            self.DEMName, 
-            dtmNoDataValueSetted, 
-            back_value=0.0, 
-            callback=default_callback
-            )
+        # wbt.set_nodata_value(
+        #     self.DEMName, 
+        #     dtmNoDataValueSetted, 
+        #     back_value=-99999,
+        #     callback=default_callback
+        #     )
         dtmMissingDataFilled = addSubstringToName(self.DEMName,'_MissingDataFilled')
         wbt.fill_missing_data(
-            dtmNoDataValueSetted, 
+            self.DEMName, 
             dtmMissingDataFilled, 
             filter=11, 
             weight=2.0, 
@@ -2839,12 +3002,20 @@ class WbT_DEM_FeatureExtraction():
             callback=default_callback
             )
         wbt.fill_depressions_wang_and_liu(
-            dtmMissingDataFilled, 
-            self.FilledDEM, 
+            dtmMissingDataFilled,  
+            self.FilledDEM,  
             fix_flats=True, 
             flat_increment=None, 
             callback=default_callback
             )
+        # wbt.fill_depressions(
+        #     dtmMissingDataFilled,  
+        #     self.FilledDEM, 
+        #     fix_flats=True, 
+        #     flat_increment=None, 
+        #     max_depth=None, 
+        #     callback=default_callback
+        #     )
         if eraseIntermediateRasters:
             try:
                 os.remove(os.path.join(wbt.work_dir,dtmNoDataValueSetted))
@@ -2871,8 +3042,8 @@ class WbT_DEM_FeatureExtraction():
     
     def d8_flow_accumulation(self)-> os.path:
         '''
-        @DEM: Filled DEM raster.
-        @Output: d8_flow Accumulation raster from a filled DEM.
+        @self.DEM: Filled DEM raster.
+        @self.Output: d8_flow Accumulation raster from a filled DEM.
         '''
         d8FAccOutput = addSubstringToName(self.FilledDEM,"_d8fllowAcc" ) 
         wbt.d8_flow_accumulation(
@@ -2935,7 +3106,22 @@ class WbT_DEM_FeatureExtraction():
         )
         return output
 
-    def DInfFlowAcc(self, inD8Pointer, log = False)-> os.path:
+    def dInfPointer(self):
+        '''
+        Compute D-Infinity flow direction based on the DInf algorithm.   
+        @argument:
+         @inFilledDTMName: DEM without spurious points are depression.  
+        @UOTPUT: DInf_pioter: Raster to use as input for D-infinity flow direction and flow accumulation calculations. 
+        '''
+        output = addSubstringToName(self.FilledDEM,"_dInfPointer")
+        wbt.d_inf_pointer(
+            self.FilledDEM, 
+            output, 
+            callback=default_callback
+            )
+        return output
+
+    def DInfFlowAcc(self, dInf_Pointer, log = False)-> os.path:
         ''' 
         Compute DInfinity flow accumulation algorithm.
         Ref: https://www.whiteboxgeo.com/manual/wbt_book/available_tools/hydrological_analysis.html#dinfflowaccumulation  
@@ -2949,11 +3135,11 @@ class WbT_DEM_FeatureExtraction():
         '''
         output = addSubstringToName(self.FilledDEM,"_dInfFAcc")
         wbt.d_inf_flow_accumulation(
-            inD8Pointer, 
+            dInf_Pointer, 
             output, 
-            out_type="Specific Contributing Area", 
+            out_type='ca', 
             threshold=None, 
-            log=log, 
+            log=False, 
             clip=False, 
             pntr=True, 
             callback=default_callback
@@ -3004,7 +3190,7 @@ class WbT_DEM_FeatureExtraction():
         )
         return output
 
-    def thresholdingStrahlerOrders(self, strahlerOrderRaster, maxStrahOrder:int=4) ->os.path:
+    def thresholdingStrahlerOrders(self, strahlerOrderRaster, maxStrahOrder:int=3) ->os.path:
         '''
         Extract the desired numer of strahler orders. 
         @strahlerOrderRaster
@@ -3085,7 +3271,7 @@ class WbT_DEM_FeatureExtraction():
         @residuals:	Convert elevation to residuals of a linear model
         '''
         output = addSubstringToName(self.DEMName, '_GMorph')
-        wbt.geomorphons(
+        answ = wbt.geomorphons(
             self.DEMName, 
             output, 
             search=50, 
@@ -3096,6 +3282,7 @@ class WbT_DEM_FeatureExtraction():
             residuals=False, 
             callback=default_callback
         )
+        print(answ)
         return output
 
     def FloodOrder(self,)-> os.path:
@@ -3201,6 +3388,7 @@ class generalRasterTools():
             inputs = self.prepareInputForResampler(inputRaster)
         else: 
             inputs = inputRaster        
+        print("Started resampling .......")
         wbt.resample(
             inputs, 
             outputFilePathAndName, 
@@ -3209,6 +3397,7 @@ class generalRasterTools():
             method= resampleMethod, 
             callback=default_callback
             )
+        print("Resampling is DONE")
         return outputFilePathAndName
      
     def mosaikAndResamplingFromCSV(self,csvName, outputResolution:int, csvColumn:str, clearTransitDir = False):
@@ -3235,18 +3424,21 @@ class generalRasterTools():
         dtmFtpList = createListFromCSVColumn(sourcePath_dtm_ftp,csvColumn)
         
         ## Download tails to transit folder
-        # downloadTailsToLocalDir(dtmFtpList,transitFolderPath)
+        downloadTailsToLocalDir(dtmFtpList,transitFolderPath)
         savedWDir = self.workingDir
         resamplerOutput = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
-        resamplerOutput_CRS_OK = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m.tif'))
+        resamplerOutput_CRS_OK = makePath(destinationFolder,(name +'_'+str(outputResolution)+'m_CRS.tif'))
         wbt.set_working_dir(transitFolderPath)
         
         ## recover all downloaded *.tif files path
         dtmTail = listFreeFilesInDirByExt(transitFolderPath, ext = '.tif')
         crs,_ = self.get_CRSAndTranslation_GTIFF(dtmFtpList[0])
-        
+        print(f"CRS is reaady : {crs}")
+
+
         ## Merging tiles and resampling
         self.rasterResampler(dtmTail,resamplerOutput,outputResolution)
+        print("Setting CRS in output" )
         self.set_CRS_GTIF(resamplerOutput, resamplerOutput_CRS_OK, crs)
         wbt.set_working_dir(savedWDir)
         
@@ -3302,9 +3494,9 @@ class generalRasterTools():
         with rio.open(input_gtif) as src:
         # Extract spatial metadata
             input_crs = src.crs
-            input_gtif  = src.transform
+            input_translation  = src.transform
             src.close()
-            return input_crs, input_gtif  
+        return input_crs, input_translation  
 
     def set_CRS_GTIF(self,input_gtif, output_tif, in_crs):
         arr, kwds = self.separate_array_profile(input_gtif)
@@ -3368,7 +3560,7 @@ def DEMFeaturingForMLP_WbT(DEM)-> list:
     4- Fill DEM with wang_and_liu method
     5- Slope in corrected DEM
     6- Compute flow direction <D8_pointe()>
-    7- Compute Flow accumulation <DInfFlowAcc()>
+    7- Compute Flow accumulation <D8FlowAcc()>
     8- Extract stream.
     9- Compute stream order with Strahler Order.
     10- Extract main stream.
@@ -3377,31 +3569,31 @@ def DEMFeaturingForMLP_WbT(DEM)-> list:
     13- Compute distance to stream.(Proximity)
 
     @DEM: Digital elevation mode raster.
-    @Return: A list of some produced maps. The maps to be added to a multiband *.tif.
-    
-    NOTE: Also save a list of produced features in a csv file for further automation process. 
+    @Return: A list of some of the produced maps. The maps to be added to a multiband *.tif.
     '''
     outList = [DEM]
     DEM_Features = WbT_DEM_FeatureExtraction(DEM)
-    
     print(f"Extracting features from DEM >>>>")
+
     # Geomorphons
     geomorph = DEM_Features.wbT_geomorphons()
     # replace_no_data_value(geomorph)
     outList.append(geomorph)
     print(f"-------------Geomorphons ready at {geomorph}")
-    ## Flood Order
-    FloodOrd = DEM_Features.FloodOrder()
-    replace_no_data_value(FloodOrd)
-    outList.append(FloodOrd)
-    print(f"-------------Flood Order ready at {FloodOrd}")
+
+     # Relative elevation on corrected DEM
+    relativeElev = computeRelativeElevation(DEM)
+    outList.append(relativeElev)
+
     # DEM Filling
     DEM_Features.fixNoDataAndfillDTM()
     print(f"-------------DEM corrected ready at {DEM_Features.FilledDEM}")
+   
     ## Slope
     slope = DEM_Features.computeSlope()
     outList.append(slope)
     print(f"-------------Slope ready at {slope}")
+    
     ## Flow direction
     D8Pointer = DEM_Features.d8_Pointer() 
     print(f"-------------Flow direction ready at {D8Pointer}")
@@ -3409,20 +3601,41 @@ def DEMFeaturingForMLP_WbT(DEM)-> list:
     replace_no_data_value(FAcc)
     outList.append(FAcc)
     print(f"-------------Flow accumulation ready at {FAcc}")
+    
+    ## DInf Flow direction
+    dInfPointer = DEM_Features.dInfPointer() 
+    print(f"-------------Flow direction ready at {dInfPointer}")
+    
+    ## DInfFlow accumulation
+    DInfFAcc = DEM_Features.DInfFlowAcc(dInfPointer)
+    replace_no_data_value(DInfFAcc)
+    outList.append(DInfFAcc)
+    print(f"-------------DInfinity Flow accumulation ready at {DInfFAcc}")
+
+    # Extract Stream
     stream = DEM_Features.extract_stream(FAcc)
     print(f"-------------Stream ready at {stream}")
     strahlerOrder = DEM_Features.computeStrahlerOrder(D8Pointer,stream)
     print(f"-------------Strahler Order ready at {strahlerOrder}")
     mainRiver = DEM_Features.thresholdingStrahlerOrders(strahlerOrder, maxStrahOrder=3)
     print(f"-------------Main river ready at {mainRiver}")
+    
+     # Compute HAND 
     HAND = DEM_Features.WbT_HAND(mainRiver)
     outList.append(HAND)
     print(f"-------------HAND index ready at {HAND}")
+    
+    # Compute HAND Euclidean;
+    HAND_Euc = DEM_Features.WbT_HAND_euclidean(mainRiver)
+    outList.append(HAND_Euc)
+    print(f"-------------HAND index ready at {HAND_Euc}")
     proximity = computeProximity(mainRiver)
     outList.append(proximity)
     print(f"-------------Proximity index ready at {proximity}")
+   
     ## Catchment extraction
     DEM_Features.watershedHillslopes(D8Pointer,mainRiver)
+    
     ### Save the list of features path as csv. 
     csvPath = replaceExtention(DEM,'_FeaturesPathList.csv')
     createCSVFromList(csvPath,outList)
@@ -3448,7 +3661,7 @@ def downloadTailsToLocalDir(tail_URL_NamesList, localPath):
     print(f"Tails downloaded to: {confirmedLocalPath}")
 
 ##################################################################
-########  DATA Analis tools for Geospatial Information   ########
+########  DATA Analys tools for Geospatial Information   ########
 ##################################################################
 
 def remove_nan_vector(array):
@@ -3544,7 +3757,7 @@ def plotRasterPDFComparison(DEMList:list,title:str='Raster PDF', ax_x_units:str=
     if show:
         plt.show()
 
-def addCollFromRasterToDataFrame(df_In,map, colName:str='')->pd.DataFrame:
+def addCollFromRasterToDataFrame(df_In:pd.DataFrame,map:os.path, colName:str='')->pd.DataFrame:
     '''
     Add a column to a dataset, sampling from a raster at the points defined in the x_coord and y_coord of the input dataframe.
     @df_In: pandas DataFrame with the two first colums being: x_coord,y_coord.
@@ -3552,7 +3765,7 @@ def addCollFromRasterToDataFrame(df_In,map, colName:str='')->pd.DataFrame:
     @colName: Name to asigne to the new column.If empty, the new column will be the map prefix. 
     @return: A dataframe with a column containing the sampling from <map>. 
     '''
-    xyCols = df_In.iloc[:, :2].values
+    xyCols = df_In.iloc[:,:2].values
     newColValues = getRasterValuesByCoordList(map,xyCols)
     df_out = df_In.copy() 
     if colName:
@@ -3602,7 +3815,7 @@ list of the built-in color maps in Matplotlib:
 
 '''
 
-def read_shapefile_at_xy(gdf:gpd.GeoDataFrame, field_name, x, y)-> [np.array,list]:
+def read_shapefile_at_xy(gdf:gpd.GeoDataFrame, field_name, x, y)-> Tuple[np.array,list]:
     '''
     ## To read the shapefile into a geopandas dataframe
     gdf = gpd.read_file(file_path)
@@ -3612,7 +3825,7 @@ def read_shapefile_at_xy(gdf:gpd.GeoDataFrame, field_name, x, y)-> [np.array,lis
     # return the feature values as an array
     return feature_values
 
-def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordinates)->[np.ndarray,list]:
+def sampleVectorFieldByUniqueVal_shpfile(shapefile_path, field_name:str, coordinates)->Tuple[np.ndarray,list]:
     '''
     Sample a shapefile from a list of <coordinates> and return: a column per unique value in the <field_name> and a list of unique values as string.
     NOTE: The function have been created to sample flood labels polygons by classes for the flood modeling project. 
@@ -3730,15 +3943,25 @@ def maxParalelizer(function,args):
     print(result)
 
 ####   Replay
-def from_TifList_toDataFrame(bandsList:list,labels:os.path=None,mask:os.path=None, samplingRatio:float=0.1)->os.path:
+def from_TifList_toDataFrame(bandsList:list,
+                            labelsRaster:os.path=None,
+                            mask:os.path=None,
+                            labelColName:str='',
+                            samplingRatio:float=0.1
+                            )->pd.DataFrame:
     '''
-    Sampling automatically a DEM of multiples bands and a polygon, to produce a DataSet. 
+    Automatically random sampling from a multiband raster and add a label column from the <labels> raster, to produce a DataSet.
+    @bandsList:list: List of <bandas.tif>, independent raster to stack in a multiband raster. This multiband ensure geospatial coherence for sampling by coordinates. 
+    @labels:os.path: *.Tif file with the label information to add to the final dataframe. 
+    @mask:os.path=None: *.shp, Optional: If a mask is provided, the sampling will take place into the mask area. 
+    @samplingRatio:float=0.1 (Default). Proportion of the total number of pixels into the sampling area to be etracted. The total is limited to a threshold defined into the <randomSamplingMultiBandRaster()> function. 
+    @return: A path to the *csv containind the dataset. 
     '''
     ## Create the list of names for the dataFrame by extracting the band's names from the list of full path. Additionally, create column names for coordinates.
     colList = extractNamesListFromFullPathList(bandsList,['x_coord','y_coord'])
     ## Build a multiband raster to ensure spatial correlation between features at sampling time.
     DEM = bandsList[0]
-    rasterMultiband = addSubstringToName(DEM,'_FullDataset')
+    rasterMultiband = addSubstringToName(DEM,'_Dataset')
     stackBandsInMultibandRaster(bandsList,rasterMultiband)
     ## Crop the multiband raster if needed.
     if mask:
@@ -3751,35 +3974,76 @@ def from_TifList_toDataFrame(bandsList:list,labels:os.path=None,mask:os.path=Non
     samplesArr = randomSamplingMultiBandRaster(raster,ratio=samplingRatio)
     ## Build a dataframe with the samples
     df = pd.DataFrame(samplesArr,columns=colList)
-    df = addCollFromRasterToDataFrame(df,labels,'Labels')
-    scv_output = replaceExtention(rasterMultiband,'.csv')
-    print(df.head())
+    df = addCollFromRasterToDataFrame(df,labelsRaster,labelColName)
+    # scv_output = replaceExtention(rasterMultiband,'.csv')
+    print(df.describe())
+    # df.to_csv(scv_output,index=None)
+    # buildShapefilePointFromCsvDataframe(scv_output,EPGS=3979)
+    return df
+
+def from_TifList_toDataFrame_ForRegModelingApplication(bandsList:list,mask:os.path=None, outRasterMultibandPath:os.path=None)->os.path:
+    '''
+    Sampling  a Multiband Raster, automatically created from the list of rasters provided in <@bandList>. The dataset contains points where at list one band have a non-zero value. Consider posterior cleaning of the dataset. 
+    @bandsList:list: List of path to the rasters to buil the multiband raster from.
+    @mask:os.path(Default = None): Mask to crop the raster. If it is provided, the multiband raster will be croped by.
+    @outRasterMultibandPath:os.path (Default = None): Output path for the multiband raster to be created.
+    '''
+    ## Create the list of names for the dataFrame by extracting the band's names from the list of full path. Additionally, create column names for coordinates.
+    colList = extractNamesListFromFullPathList(bandsList,['x_coord','y_coord'])
+    print(colList)
+    ## Build a multiband raster to ensure spatial correlation between features at sampling time.
+    outRasterMultibandPath = addSubstringToName(outRasterMultibandPath,'_SampledFullExt_Dataset')
+    stackBandsInMultibandRaster(bandsList,outRasterMultibandPath)
+    ## Crop the multiband raster if needed.
+    if mask:
+        cropped = addSubstringToName(outRasterMultibandPath,'_AOI')
+        raster = clipRasterByMask(outRasterMultibandPath,mask,cropped)
+        replace_no_data_value(raster)
+    else:
+        raster = outRasterMultibandPath
+        replace_no_data_value(raster)
+    ## Random sampling the raster with a density defined by the ratio. This is the more expensive opperation..be patient. 
+    samplesArr = sampling_Full_raster_GDAL(raster)
+    ## Build a dataframe with the samples
+    df = pd.DataFrame(samplesArr,columns=colList)
+    scv_output = replaceExtention(outRasterMultibandPath,'.csv')
+    print(df.describe)
     df.to_csv(scv_output,index=None)
     # buildShapefilePointFromCsvDataframe(scv_output,EPGS=3979)
     return scv_output
 
-def from_TifList_toDataFrame_ForRegModelingApplication(bandsList:list,mask:os.path=None, rasterMultiband:os.path=None)->os.path:
+def from_MultibandRaster_toDataFrame_ForRegModelingApplication(bandsList:list,mask:os.path=None, rasterMultiband:os.path=None)->os.path:
     '''
     Sampling automatically a DEM of multiples bands to produce a DataSet. The dataset contains points where at list one band have a non-zero value.  
+    @bandsList:list: List of path to the rasters to buil the multiband raster from.
+    @mask:os.path(Default = None): Mask to crop the raster. If it is provided, the multiband raster will be croped by.
+    @outRasterMultibandPath:os.path (Default = None):Raster multiband to sample from. 
     '''
     ## Create the list of names for the dataFrame by extracting the band's names from the list of full path. Additionally, create column names for coordinates.
     colList = extractNamesListFromFullPathList(bandsList,['x_coord','y_coord'])
-    
-    ## Build a multiband raster to ensure spatial correlation between features at sampling time.
-    stackBandsInMultibandRaster(bandsList,rasterMultiband)
+    print(colList)
+   
     ## Crop the multiband raster if needed.
     if mask:
         cropped = addSubstringToName(rasterMultiband,'_AOI')
         raster = clipRasterByMask(rasterMultiband,mask,cropped)
         replace_no_data_value(raster)
+        ## Full sampling the raster. This is the more expensive opperation..be patient. 
+        samplesArr = sampling_Full_raster_GDAL(raster)
+    
     else:
-        raster = rasterMultiband
-    ## Random sampling the raster with a density defined by the ratio. This is the more expensive opperation..by patient. 
-    samplesArr = sampling_Full_raster_GDAL(raster)
+        replace_no_data_value(rasterMultiband)
+        ## Full sampling the raster. This is the more expensive opperation..be patient. 
+        samplesArr = sampling_Full_raster_GDAL(rasterMultiband)
+   
+
     ## Build a dataframe with the samples
     df = pd.DataFrame(samplesArr,columns=colList)
-    scv_output = replaceExtention(rasterMultiband,'.csv')
-    print(df.head())
+    ## Create Dataset output name.
+    rasterMultibandDataste = addSubstringToName(rasterMultiband,'_Dataset')
+    scv_output = replaceExtention(rasterMultibandDataste,'.csv')
+    print(df.describe)
     df.to_csv(scv_output,index=None)
+    
     # buildShapefilePointFromCsvDataframe(scv_output,EPGS=3979)
     return scv_output
